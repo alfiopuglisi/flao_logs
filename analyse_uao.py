@@ -2,14 +2,14 @@
 
 import csv
 import os, glob, time, getopt, sys, calendar, re, math
-import operator
+import operator, fileinput
 
 def usage():
     print 'Usage:'
-    print 'analyse.py --day=YYYYMMDD --side=[R|L][-v] [--html] [--summary="summary.txt"] [--wfslogdir="log directory"] [--adseclogdir="log directory"] [--dataoutdir="data out directory"]'
+    print 'analyse.py --day=YYYYMMDD --side=[R|L][-v] [--html] [--flao] [--summary="summary.txt"] [--wfslogdir="log directory"] [--adseclogdir="log directory"] [--dataoutdir="data out directory"]'
 
 try:
-    optlist, args = getopt.getopt( sys.argv[1:], 'v', ['html', 'day=', 'side=', 'summary=', 'wfslogdir=', 'adseclogdir=', 'dataoutdir='])
+    optlist, args = getopt.getopt( sys.argv[1:], 'v', ['html', 'flao', 'day=', 'side=', 'summary=', 'wfslogdir=', 'adseclogdir=', 'dataoutdir='])
 except getopt.GetoptError, err:
     print str(err)
     usage()
@@ -17,6 +17,7 @@ except getopt.GetoptError, err:
 
 verbose = False
 html    = False
+flao    = False
 summary = None
 logdir = '/aodata/UAO_logs'
 wfslogdir=None
@@ -46,6 +47,8 @@ for o,a in optlist:
         dataoutdir = a
     elif o == '--side':
         side = a
+    elif o == '--flao':
+        flao = True
 
 
 if day is None:
@@ -66,12 +69,57 @@ if (side is not 'L') and (side is not 'R'):
     print
     sys.exit(2)
 
-#if side is 'R':
-#    wfslogdir   = os.path.join(logdir, 'flao-dxwfs')
-#    adseclogdir = os.path.join(logdir, 'dxadsec')
-#else:
-#    wfslogdir   = os.path.join(logdir, 'flao-sxwfs')
-#    adseclogdir = os.path.join(logdir, 'sxadsec')
+
+
+def lookup_flao_logs(logdir, name, day):
+    '''Returns a list of log files for the specified day'''
+
+    start = calendar.timegm(time.strptime(day+' 000000', '%Y%m%d %H%M%S'))
+    end   = calendar.timegm(time.strptime(day+' 235959', '%Y%m%d %H%M%S'))
+
+    pattern = os.path.join(logdir, name)+'*log*'
+    files = glob.glob(pattern)
+    ret = []
+    prev_file= ''
+    done_prev = False
+    done_next = False
+    for file in sorted(files):
+        parts = file.split('.')
+        try:
+            if parts[-1] == 'gz':
+                timestamp = int(parts[-3])
+            else:
+                timestamp = int(parts[-2])
+        except:
+            continue
+
+        if timestamp >= start and not done_prev:
+            ret.append(prev_file)
+            done_prev = True
+            ret.append(file)
+        elif timestamp >= start and timestamp <= end:
+            if not done_prev:
+                ret.append(prev_file)
+                done_prev = True
+            ret.append(file)
+        elif timestamp > end:
+            if not done_next:
+                ret.append(file)
+                done_next = True
+
+        prev_file = file
+
+    return filter(lambda x:x!='', ret)
+
+def chain_logfiles(logfiles, grep=None):
+
+   f = fileinput.input(files=logfiles, openhook=fileinput.hook_compressed)
+
+   for line in f:
+       if grep is not None and grep not in line:
+           continue
+       yield line
+
 
 def logfilename(process, side, day, logdir=None, num=0):
     y = day[0:4]
@@ -113,6 +161,11 @@ def logfile( name, side, day, logdir=None, grep=None):
     ''''
     Returns a file-like object to read a logfile
     '''
+
+    if flao:
+        logfiles = lookup_flao_logs(logdir, name, day)
+        return chain_logfiles(logfiles, grep=grep)
+
     for n in range(10000):
         filename= logfilename( name, side, day, logdir=logdir, num=n)
         filenamegz = filename+'.gz'
@@ -140,7 +193,7 @@ def logfile( name, side, day, logdir=None, grep=None):
 
 def search( logdir, name, side, day, string=None, mindiff=1, getDict=False):
 
-    found = logfile( name, side, day, logdir=logdir, grep=string).readlines()
+    found = logfile( name, side, day, logdir=logdir, grep=string)
     prev=0
     found2={}
     p = re.compile('\>  \. (.*)')
@@ -199,6 +252,7 @@ class SkipFrameEvent(Event):
     @staticmethod
     def fromLogLine(line):
         t = log_timestamp(line)
+        line = line.replace('->', '--') # Avoid extra ">"
         log, msg = line.split('>')
         return SkipFrameEvent( t, msg)
 
@@ -211,8 +265,10 @@ class FailedActuatorEvent(Event):
     def fromLogLine(line):
         t = log_timestamp(line)
         pattern = 'Failing actuator detected N. (\d+)(.*)'
-        actno, reason = re.findall( pattern, line)[0]
-        log, msg = line.split('>')
+        found = re.findall( pattern, line)
+        if len(found) > 0:
+            actno, reason = found[0]
+            log, msg = line.split('>')
         return FailedActuatorEvent( t, 'Act: %s - %s' % (actno, msg), int(actno))
 
 
@@ -223,12 +279,15 @@ class RIPEvent(Event):
     @staticmethod
     def fromLogLine(line):
         t = log_timestamp(line)
-        procname, other = line.split('_')
-        if procname=='fastdiagn':
-            procname = 'FastDiagnostic'
-        if procname=='housekeeper':
-            procname = 'HouseKeeper'
-        return RIPEvent( t, 'Detected by %s' % procname)
+        try:
+            procname, other = line.split('_')
+            if procname=='fastdiagn':
+                procname = 'FastDiagnostic'
+            if procname=='housekeeper':
+                procname = 'HouseKeeper'
+            return RIPEvent( t, 'Detected by %s' % procname)
+        except ValueError:
+            return RIPEvent( t, '')
 
 class SCTimeoutEvent(Event):
     def __init__(self, t, details):
@@ -242,7 +301,7 @@ class SCTimeoutEvent(Event):
 
 
 class ArbCmd:
-    def __init__(self, name, args=None, start_time=None, end_time=None, success=None, errstr=''):
+    def __init__(self, name, args='', start_time=None, end_time=None, success=None, errstr=''):
         self.name = name
         self.args = args
         self.start_time = start_time
@@ -302,8 +361,18 @@ class ArbCmd:
                 coords = map( float, re.findall( self.floatPattern, self.args))
                 if len(coords) ==2:
                     return ['X=%.2f, Y=%.2f mm' % (coords[0], coords[1])]
+                else:
+                    return ['']
 
             if self.name == 'PresetAO':
+
+                if flao:
+                    self.wfs = 'FLAO'
+                    self.mag = 8
+                    self.refX = 0.1
+                    self.refY = 0.1
+                    return ['']
+
                 wfs = re.findall( self.wfsPattern, self.args)[0]
                 mag = float(re.findall( self.magPattern, self.args)[0])
                 refX = float(re.findall( self.refXPattern, self.args)[0])
@@ -326,7 +395,10 @@ class ArbCmd:
             if self.name == 'CompleteObs':
                 tt = self.total_time()
                 ot = self.open_time()
-                per = ot*100/tt
+                if tt != 0:
+                    per = ot*100/tt
+                else:
+                    per = 0
                 s = '%s, open shutter: %ds (%d%%)' % (self.wfs, ot, per)
                 details.append(s)
 
@@ -383,7 +455,9 @@ def search_arb_cmd( logdir, name, side, day, cmd, mindiff=1):
     return cmds
 
 
-def mix_lines( lines1, lines2):
+def mix_lines(lines1, lines2):
+
+     return sorted(lines1 + lines2, key=log_timestamp)
 
      result=[]
      n1 = len(lines1)
@@ -392,6 +466,7 @@ def mix_lines( lines1, lines2):
      p2 =0
      while (p1<n1) and (p2<n2):
          t1 = log_timestamp(lines1[p1])
+         print t1
          t2 = log_timestamp(lines2[p2])
          if (t1<t2) and (p1<n1):
              result.append(lines1[p1])
@@ -407,22 +482,37 @@ def get_AOARB_cmds( side, day):
     import re
     aoarb_lines = []
     pywfs_lines = []
+
+    loggername = 'MAIN'
+    if flao:
+       loggername = 'COMMANDHANDLER'
+
     if adseclogdir:
-       aoarb_lines = search( adseclogdir, 'AOARB', side, day, 'MAIN', mindiff=0)
+       aoarb_lines = search( adseclogdir, 'AOARB', side, day, string=loggername, mindiff=0)
        # Use dummy wfs lines when running on the adsec
-       if not wfslogdir:
-          pywfs_lines= search( adseclogdir, 'pinger', side, day, 'MAIN', mindiff=0)
+#       if not wfslogdir:
+#          pywfs_lines= search( adseclogdir, 'pinger', side, day, 'MAIN', mindiff=0)
 
-    if wfslogdir:
-       pywfs_lines = search( wfslogdir, 'pyarg', side, day, 'MAIN', mindiff=0)
+#    if wfslogdir:
+#       pywfs_lines = search( wfslogdir, 'pyarg', side, day, 'MAIN', mindiff=0)
+#
 
 
-    lines = mix_lines(aoarb_lines, pywfs_lines)
+    lines = mix_lines(list(aoarb_lines), list(pywfs_lines))
+
 
     cmds=[]
     curCmd=None
+
+    startCmdFlao = 'FSM (status'
+    startCmdUao = 'Request:'
+
     p1 =re.compile('Request: (.*?)\((.*)\)')
     p2 =re.compile('Request: (.*)')
+    p3 =re.compile('has received command \d+ \((.*)\)') # FLAO command
+
+    endCmdFlao = ' successfully completed'
+    endCmdUao  = 'Status after command:'
 
     exceptionStr  = '[AOException]'
     illegalCmdStr = 'Illegal command' 
@@ -436,7 +526,7 @@ def get_AOARB_cmds( side, day):
 
     for line in lines:
       try:
-        if 'Request:' in line:
+        if (startCmdFlao in line) or (startCmdUao in line):
 
             # Skip this command, that has no effect on FSM
             if 'getLastImage' in line:
@@ -448,8 +538,10 @@ def get_AOARB_cmds( side, day):
 
             t = log_timestamp(line)
             m1 = p1.search(line)
+            m2 = p2.search(line)
+            m3 = p3.search(line)
             name = None
-            args = None
+            args = ''
             if m1:
                 try:
                     name = m1.group(1)
@@ -457,23 +549,33 @@ def get_AOARB_cmds( side, day):
                 except IndexError as e:
                     print 'Malformed request: '+line
                     continue
-            else:
-                m2 = p2.search(line)
-                if not m2:
-                    print 'Malformed request: '+line
-                    continue
+            elif m2:
                 try:
                     name = m2.group(1)
                 except IndexError as e:
                     print 'Malformed request: '+line
+                    continue
+            elif m3:
+                try:
+                    name = m3.group(1)
+                except IndexError as e:
+                    print 'Malformed request: '+line
+                    continue
+            else:
+                print 'Malformed request: '+line
+                continue
             
  
-            curCmd = ArbCmd( name=name, args=args, start_time=t, end_time=None, success=None, errstr='')
+            default_success = None
+            if flao:
+                default_success = False
+
+            curCmd = ArbCmd( name=name, args=args, start_time=t, end_time=None, success=default_success, errstr='')
             if name == 'AcquireRefAO':
                 lastAcquireRef = curCmd
 
 
-        elif 'Status after command:' in line: 
+        elif (endCmdFlao in line) or (endCmdUao in line):
             t = log_timestamp(line)
             curCmd.end_time = t
             curCmd.success = True
@@ -554,10 +656,14 @@ class CompleteObs(ArbCmd):
     def open_time(self):
         open_shutter = 0
         for interval in self.intervals:
+            if interval.start is None or interval.end is None:
+                return 0
             open_shutter += interval.end - interval.start
         return open_shutter
 
     def total_time(self):
+        if self.end_time is None or self.start_time is None:
+            return 0
         return self.end_time - self.start_time
 
 
@@ -573,7 +679,9 @@ def detectCompleteObs(cmds):
     inPreset = False
     newCmds = []
     for cmd in cmds:
+        print cmd.name
         if cmd.name == 'PresetAO' and cmd.is_instrument_preset():
+            print 'Preset valid'
             inPreset = True
             inObs = False
             obsCmd = CompleteObs(name='CompleteObs', start_time = cmd.start_time)
@@ -583,17 +691,19 @@ def detectCompleteObs(cmds):
             if cmd.name == 'PauseAO':
                 obsCmd.closeshutter(cmd.start_time)
             if cmd.name == 'ResumeAO':
+                print('Resume: open shutter',cmd.start_time)
                 obsCmd.openshutter(cmd.start_time)
-            if cmd.name == 'Stop':
+            if cmd.name == 'Stop' or cmd.name == 'StopAO':
                 obsCmd.closeshutter(cmd.start_time)
                 obsCmd.end_time = cmd.end_time
                 newCmds.append(obsCmd)
                 inObs = False
 
         elif inPreset is True:
-            if cmd.name == 'StartAO':
+            if cmd.name == 'StartAO' or cmd.name == 'Start AO':
                 inPreset = False
                 inObs = True
+                print('Start: open shutter',cmd.end_time)
                 obsCmd.openshutter(cmd.end_time)
 
         newCmds.append(cmd)
