@@ -459,24 +459,6 @@ def mix_lines(lines1, lines2):
 
      return sorted(lines1 + lines2, key=log_timestamp)
 
-     result=[]
-     n1 = len(lines1)
-     n2 = len(lines2)
-     p1 =0
-     p2 =0
-     while (p1<n1) and (p2<n2):
-         t1 = log_timestamp(lines1[p1])
-         print t1
-         t2 = log_timestamp(lines2[p2])
-         if (t1<t2) and (p1<n1):
-             result.append(lines1[p1])
-             p1+=1
-         else:
-             result.append(lines2[p2])
-             p2+=1
-        
-     return result
-
 def get_AOARB_cmds( side, day):
 
     import re
@@ -679,7 +661,6 @@ def detectCompleteObs(cmds):
     inPreset = False
     newCmds = []
     for cmd in cmds:
-        print cmd.name
         if cmd.name == 'PresetAO' and cmd.is_instrument_preset():
             print 'Preset valid'
             inPreset = True
@@ -1004,6 +985,48 @@ def output_cmd( title, found, cmd_code='1'):
     return success_rate
 
 
+def update_cmd_csv(cmds, day):
+
+    csvfilename = os.path.join(dataoutdir, 'cmd_%s.csv' % side)
+    # read csv
+    if os.path.exists(csvfilename):
+        with open(csvfilename, 'rb') as csvfile:
+            data = list(csv.reader(csvfile, delimiter=','))
+    else:
+        data = []
+
+    if len(cmds) < 1:
+        return
+
+    # Remove anything matching this day/cmd (assumes all cmds are equal)
+    data = filter(lambda row: (row[0] != day) or (row[2] != cmds[0].name), data)
+
+    # Remove header if any
+    data = filter(lambda row: row[0] != 'day', data)
+
+    # Add our data
+    for cmd in cmds:
+        if not cmd.success:
+            continue
+        if cmd.end_time is None or cmd.start_time is None:
+            continue
+
+        d = dayStr(cmd.start_time)
+        h = hourStr(cmd.start_time)
+        tottime = '%d' % (cmd.end_time - cmd.start_time)
+        row = (d, h, cmd.name, tottime)
+        data.append(row)
+
+    data.sort(key=lambda x: x[0])
+
+    hdr = ('day', 'hour', 'command', 'elapsed')
+    data = [hdr]+data
+
+    # Save csv   
+    print(csvfilename)
+    with open(csvfilename, 'wb') as csvfile:
+        csv.writer(csvfile, delimiter=',').writerows(data)
+
 
 
 def update_output_csv(cmds, day):
@@ -1071,6 +1094,15 @@ AOARB_cmds = detectCompleteObs( AOARB_cmds)
 
 update_output_csv(cmdsByName(AOARB_cmds, 'CompleteObs'), day)
 
+update_cmd_csv(cmdsByName(AOARB_cmds, 'PresetAO'), day)
+update_cmd_csv(cmdsByName(AOARB_cmds, 'CenterStar'), day)
+update_cmd_csv(cmdsByName(AOARB_cmds, 'CenterPupils'), day)
+update_cmd_csv(cmdsByName(AOARB_cmds, 'CheckFlux'), day)
+update_cmd_csv(cmdsByName(AOARB_cmds, 'CloseLoop'), day)
+update_cmd_csv(cmdsByName(AOARB_cmds, 'OptimizeGain'), day)
+update_cmd_csv(cmdsByName(AOARB_cmds, 'ApplyOpticalGain'), day)
+update_cmd_csv(cmdsByName(AOARB_cmds, 'OffsetXY'), day)
+
 ##########
 
 string = 'CompleteObs'
@@ -1133,6 +1165,66 @@ found = cmdsByName( AOARB_cmds, string)
 success_rate = output_cmd( title, found, cmd_code=3)
 table['startao'] = len(found)
 success['startao'] = success_rate
+
+##########
+
+string = 'CenterStar'
+title  = 'CenterStar'
+
+found = cmdsByName( AOARB_cmds, string)
+success_rate = output_cmd( title, found, cmd_code=3)
+table['centerstar'] = len(found)
+success['centerstar'] = success_rate
+
+##########
+
+string = 'CenterPupils'
+title  = 'CenterPupils'
+
+found = cmdsByName( AOARB_cmds, string)
+success_rate = output_cmd( title, found, cmd_code=3)
+table['centerpupils'] = len(found)
+success['centerpupils'] = success_rate
+
+##########
+
+string = 'CheckFlux'
+title  = 'CheckFlux'
+
+found = cmdsByName( AOARB_cmds, string)
+success_rate = output_cmd( title, found, cmd_code=3)
+table['checkflux'] = len(found)
+success['checkflux'] = success_rate
+
+##########
+
+string = 'CloseLoop'
+title  = 'CloseLoop'
+
+found = cmdsByName( AOARB_cmds, string)
+success_rate = output_cmd( title, found, cmd_code=3)
+table['closeloop'] = len(found)
+success['closeloop'] = success_rate
+
+##########
+
+string = 'OptimizeGain'
+title  = 'OptimizeGain'
+
+found = cmdsByName( AOARB_cmds, string)
+success_rate = output_cmd( title, found, cmd_code=3)
+table['optimizegain'] = len(found)
+success['optimizegain'] = success_rate
+
+##########
+
+string = 'ApplyOpticalGain'
+title  = 'ApplyOpticalGain'
+
+found = cmdsByName( AOARB_cmds, string)
+success_rate = output_cmd( title, found, cmd_code=3)
+table['applyopticalgain'] = len(found)
+success['applyopticalgain'] = success_rate
 
 ##########
 
