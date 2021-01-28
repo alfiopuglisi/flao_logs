@@ -1,0 +1,143 @@
+
+<html>
+<head>
+  <title>AO commands statistics for 20180119</title>
+  <link rel="stylesheet" href="aotable.css">
+</head>
+<body>
+<H1>AO commands statistics for 20180119</H1>
+
+data.csv
+<HR>
+<H2>Complete observations (from PresetAO to StopAO, instrument presets only)</H2>
+<p>Total: 1 - Success rate: 0%</p>
+<p>
+<table id="aotable">
+<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>
+<tr><td>20180119 18:43:02</td><td>CompleteObs</td><td>390.0 s</td><td style="width: 300px"></td><td>FLAO, open shutter: 106s (27%)</td></tr>
+</table>
+
+</p>
+<HR>
+<H2>PresetAO</H2>
+<p>Total: 5 - Success rate: 100%</p>
+<p>
+<table id="aotable">
+<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>
+<tr><td>20180119 18:26:06</td><td>PresetAO</td><td>121.5 s</td><td style="width: 300px">Success</td><td>FLAO, star mag= 9.5, posXY= 0.0, 0.0 mm<br>Automatic mode</td></tr>
+<tr><td>20180119 18:28:22</td><td>PresetAO</td><td> 35.3 s</td><td style="width: 300px">Success</td><td>FLAO, star mag= 9.5, posXY= 5.0, 0.0 mm<br>Automatic mode</td></tr>
+<tr><td>20180119 18:29:04</td><td>PresetAO</td><td> 36.0 s</td><td style="width: 300px">Success</td><td>FLAO, star mag= 9.5, posXY= -5.0, 0.0 mm<br>Automatic mode</td></tr>
+<tr><td>20180119 18:36:07</td><td>PresetAO</td><td>164.1 s</td><td style="width: 300px">Success</td><td>FLAO, star mag= 9.5, posXY= -5.0, 0.0 mm<br>Automatic mode</td></tr>
+<tr><td>20180119 18:43:02</td><td>PresetAO</td><td> 38.0 s</td><td style="width: 300px">Success</td><td>FLAO, star mag= 9.5, posXY= -5.0, 0.0 mm<br>Automatic mode</td></tr>
+</table>
+
+</p>
+<HR>
+<H2>Acquire - StartAO sequences</H2>
+<p>Total: 2 - Success rate: 50%</p>
+<p>
+<table id="aotable">
+<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>
+<tr><td>20180119 18:29:43</td><td>Acquire</td><td>Unknown</td><td style="width: 300px"> Command not completed</td><td></td></tr>
+<tr><td>20180119 18:43:47</td><td>Acquire</td><td>228.7 s</td><td style="width: 300px">Success</td><td></td></tr>
+</table>
+
+</p>
+<HR>
+<H2>Pause - Offset - Resume sequences</H2>
+<p>Total: 1 - Success rate: 0%</p>
+<p>
+<table id="aotable">
+<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>
+<tr><td>20180119 18:48:34</td><td>Offset</td><td>  2.6 s</td><td style="width: 300px"> RETRY: Offset outside FoV limits. Target xyz is -1070.86 -53.97 54.60 (0) NO_ERROR</td><td>X=999.00, Y=0.00 mm</td></tr>
+</table>
+
+</p>
+<HR>
+<H2>AcquireRefAO</H2>
+<p>Total: 2 - Success rate: 50%</p>
+<p>
+<table id="aotable">
+<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>
+<tr><td>20180119 18:29:43</td><td>AcquireRefAO</td><td>Unknown</td><td style="width: 300px"></td><td></td></tr>
+<tr><td>20180119 18:43:47</td><td>AcquireRefAO</td><td>228.7 s</td><td style="width: 300px">Success</td><td></td></tr>
+</table>
+
+</p>
+<HR>
+<H2>StartAO</H2>
+<p>Total: 2 - Success rate: 50%</p>
+<p>
+<table id="aotable">
+<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>
+<tr><td>20180119 17:02:04</td><td>StartAO</td><td>  0.0 s</td><td style="width: 300px">Illegal command for state AOArbitrator.Ready</td><td></td></tr>
+<tr><td>20180119 18:47:43</td><td>StartAO</td><td>  0.0 s</td><td style="width: 300px">Success</td><td></td></tr>
+</table>
+
+</p>
+<HR>
+<H2>Events</H2>
+<p>Total: 7</p>
+<table id="aotable">
+<tr><th>Timestamp</th><th>Event</th><th>Details</th></tr>
+<tr><td>20180119 00:00:00</td><td>RIP</td><td>Detected by FastDiagnostic</td></tr>
+<tr><td>20180119 00:39:03</td><td>RIP</td><td>Detected by FastDiagnostic</td></tr>
+<tr><td>20180119 05:43:05</td><td>FailedActuator</td><td>Act: 158 -  Failing actuator detected N. 158 Value: 0.718507 on position (CHDISTAVERAGE-0158)</td></tr>
+<tr><td>20180119 05:45:20</td><td>FailedActuator</td><td>Act: 501 -  Failing actuator detected N. 501 Value: 0.000138446 on position (CHDISTAVERAGE-0501)</td></tr>
+<tr><td>20180119 13:53:49</td><td>FailedActuator</td><td>Act: 501 -  Failing actuator detected N. 501 Value: 0.263749 on position (CHDISTAVERAGE-0501)</td></tr>
+<tr><td>20180119 18:38:41</td><td>RIP</td><td>Detected by FastDiagnostic</td></tr>
+<tr><td>20180119 23:08:19</td><td>FailedActuator</td><td>Act: 431 -  Failing actuator detected N. 431 Value: 0.269966 on position (CHDISTAVERAGE-0431)</td></tr>
+</table>
+<HR>
+<H2>OffsetXY</H2>
+<p>Total: 3 - Success rate: 33%</p>
+<p>
+<table id="aotable">
+<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>
+<tr><td>20180119 18:03:50</td><td>OffsetXY</td><td>  0.0 s</td><td style="width: 300px">Illegal command for state AOArbitrator.Ready</td><td>X=0.00, Y=0.00 mm</td></tr>
+<tr><td>20180119 18:47:50</td><td>OffsetXY</td><td> 40.0 s</td><td style="width: 300px">Success</td><td>X=999.00, Y=0.00 mm</td></tr>
+<tr><td>20180119 18:48:37</td><td>OffsetXY</td><td>  0.0 s</td><td style="width: 300px">RETRY: Offset outside FoV limits. Target xyz is -1070.86 -53.97 54.60 (0) NO_ERROR</td><td>X=999.00, Y=0.00 mm</td></tr>
+</table>
+
+</p>
+<HR>
+<H2>OffsetZ</H2>
+<p>Total: 0 - Success rate: 0%</p>
+<HR>
+<H2>Pause</H2>
+<p>Total: 1 - Success rate: 100%</p>
+<p>
+<table id="aotable">
+<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>
+<tr><td>20180119 18:48:34</td><td>Pause</td><td>  0.2 s</td><td style="width: 300px">Success</td><td></td></tr>
+</table>
+
+</p>
+<HR>
+<H2>Resume</H2>
+<p>Total: 0 - Success rate: 0%</p>
+<HR>
+<H2>PowerOnAdsec</H2>
+<p>Total: 0 - Success rate: 0%</p>
+<HR>
+<H2>PresetFlat</H2>
+<p>Total: 6 - Success rate: 66%</p>
+<p>
+<table id="aotable">
+<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>
+<tr><td>20180119 00:05:10</td><td>PresetFlat</td><td>  2.3 s</td><td style="width: 300px">Success</td><td></td></tr>
+<tr><td>20180119 05:45:32</td><td>PresetFlat</td><td>  0.0 s</td><td style="width: 300px">LoadShape: WARNING - adsecarb:Illegal command for state Ready (Load shape)</td><td></td></tr>
+<tr><td>20180119 14:14:43</td><td>PresetFlat</td><td>  0.0 s</td><td style="width: 300px">LoadShape: WARNING - adsecarb:Illegal command for state Ready (Load shape)</td><td></td></tr>
+<tr><td>20180119 18:06:29</td><td>PresetFlat</td><td>  2.5 s</td><td style="width: 300px">Success</td><td></td></tr>
+<tr><td>20180119 18:12:41</td><td>PresetFlat</td><td>  3.4 s</td><td style="width: 300px">Success</td><td></td></tr>
+<tr><td>20180119 23:39:59</td><td>PresetFlat</td><td>  2.8 s</td><td style="width: 300px">Success</td><td></td></tr>
+</table>
+
+</p>
+<HR>
+<H2>MirrorRest</H2>
+<p>Total: 0 - Success rate: 0%</p>
+
+</body>
+</html>
+
