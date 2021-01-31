@@ -623,6 +623,7 @@ class CompleteObs(ArbCmd):
     def __init__(self, *args, **kwargs):
         ArbCmd.__init__(self, *args, **kwargs)
         self.intervals = []
+        self.startobs_time = None
 
     def openshutter(self, t):
         # Detect repeated open shutters
@@ -648,7 +649,13 @@ class CompleteObs(ArbCmd):
             return 0
         return self.end_time - self.start_time
 
+    def setup_time(self):
+        if self.startobs_time is None:
+            return 0
+        return self.startobs_time - self.start_time
 
+    def offsets_time(self):
+        return self.total_time() - self.open_time() - self.setup_time()
 
 
 def detectCompleteObs(cmds):
@@ -686,6 +693,7 @@ def detectCompleteObs(cmds):
                 inObs = True
                 print('Start: open shutter',cmd.end_time)
                 obsCmd.openshutter(cmd.end_time)
+                obsCmd.startobs_time = cmd.end_time
 
         newCmds.append(cmd)
 
@@ -1052,14 +1060,19 @@ def update_output_csv(cmds, day):
         h = hourStr(cmd.start_time)
         tottime = '%d' % cmd.total_time()
         opentime = '%d' % cmd.open_time()
+        setuptime = '%d' % cmd.setup_time()
+        offsetstime = '%d' % cmd.offsets_time()
         tottime_h = str(float(tottime)/3600)
         opentime_h = str(float(opentime)/3600)
-        row = (d, h, tottime, tottime_h, opentime, opentime_h, cmd.wfs)
+        setuptime_h = str(float(setuptime)/3600)
+        offsetstime_h = str(float(offsetstime)/3600)
+         
+        row = (d, h, tottime, tottime_h, opentime, opentime_h, setuptime, setuptime_h, offsetstime, offsetstime_h, cmd.wfs)
         data.append(row)
 
     data.sort(key=lambda x: x[0])
 
-    hdr = ('day', 'hour', 'time', 'time_h', 'open', 'open_h', 'wfs')
+    hdr = ('day', 'hour', 'time', 'time_h', 'open', 'open_h', 'setup', 'setup_h', 'offsets', 'offsets_h', 'wfs')
     data = [hdr]+data
 
     # Save csv   
