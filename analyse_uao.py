@@ -313,6 +313,7 @@ class ArbCmd:
         self.magPattern ='expectedStarMagnitude = (%s)' % self.floatPattern
         self.refXPattern = 'roCoordX = (%s)' % self.floatPattern
         self.refYPattern = 'roCoordY = (%s)' % self.floatPattern
+        self.modePattern = 'mode = (\w+)'
  
     def report(self):
         timeStr = timeStr( self.start_time)
@@ -377,7 +378,8 @@ class ArbCmd:
                 mag = float(re.findall( self.magPattern, self.args)[0])
                 refX = float(re.findall( self.refXPattern, self.args)[0])
                 refY = float(re.findall( self.refYPattern, self.args)[0])
-                details.append('%s, star mag= %.1f, posXY= %.1f, %.1f mm' % (wfs, mag, myRound(refX, 1), myRound(refY, 1)))
+                mode = re.findall(self.modePattern, self.args)[0]
+                details.append('%s, star mag= %.1f, posXY= %.1f, %.1f mm, mode = %s' % (wfs, mag, myRound(refX, 1), myRound(refY, 1), mode))
                 if hasattr(self, 'intervention'):
                     if self.intervention == True:
                         interventionDesc = 'Intervention mode'
@@ -390,6 +392,7 @@ class ArbCmd:
                 self.mag = mag
                 self.refX = refX
                 self.refY = refY
+                self.mode = mode
                 details.append(interventionDesc) 
 
             if self.name == 'CompleteObs':
@@ -622,40 +625,71 @@ class CompleteObs(ArbCmd):
 
     def __init__(self, *args, **kwargs):
         ArbCmd.__init__(self, *args, **kwargs)
-        self.intervals = []
-        self.startobs_time = None
-
-    def openshutter(self, t):
-        # Detect repeated open shutters
-        if len(self.intervals) > 0 and self.intervals[-1].end == 0:
-            return
-        self.intervals.append(Interval(start=t, end=0))
-
-    def closeshutter(self, t):
-        if len(self.intervals) < 1:
-            return
-        self.intervals[-1].end = t
-
-    def open_time(self):
-        open_shutter = 0
-        for interval in self.intervals:
-            if interval.start is None or interval.end is None:
-                return 0
-            open_shutter += interval.end - interval.start
-        return open_shutter
+        self.cmds = []
 
     def total_time(self):
+        '''Total observation time from start of PresetAO to end of StopAO'''
         if self.end_time is None or self.start_time is None:
             return 0
         return self.end_time - self.start_time
 
-    def setup_time(self):
-        if self.startobs_time is None:
-            return 0
-        return self.startobs_time - self.start_time
+    def total_open_time(self):
+        '''Total time available from instrument'''
+        return self.total_time() - self.setup_duration() - self.offsets_overhead()
 
-    def offsets_time(self):
-        return self.total_time() - self.open_time() - self.setup_time()
+    def setup_duration(self):
+        '''Total setup time from start of PresetAO to end of StartAO'''
+        startao = filter(lambda x: x.name == 'StartAO' or x.name =='Start AO', self.cmds)[0]
+        #print 'Setup duration:',  startao.end_time - self.start_time
+        return startao.end_time - self.start_time
+
+    def ao_setup_overhead(self):
+        '''Total AO time from start of PresetAO to end of StartAO'''
+        ao_time = 0
+        is_intervention = False
+        for cmd in self.cmds:
+            if cmd.name in 'CenterStar CenterPupils CheckFlux CloseLoop'.split():
+                #print 'INTERVENTION', cmd.name
+                is_intervention = True
+
+        for cmd in self.cmds:
+           # print cmd.name, is_intervention, cmd.start_time, cmd.end_time
+            if cmd.name in 'Acquire Done'.split():
+                continue
+            if cmd.end_time is None or cmd.start_time is None:
+                continue
+            if is_intervention and cmd.name == 'AcquireRefAO': # Avoid double counting acquisition commands
+                continue
+
+           # print timeStr(cmd.start_time), cmd.name, cmd.end_time - cmd.start_time
+
+            if cmd.end_time is not None and cmd.start_time is not None:
+                this_cmd_time = cmd.end_time - cmd.start_time
+                ao_time += this_cmd_time
+ #               print 'AO setup: ', cmd.name, this_cmd_time, ao_time
+            if cmd.name == 'StartAO' or cmd.name == 'Start AO':
+                return ao_time
+        return 0
+
+    def telescope_overhead(self):
+        '''Telescope overhead during setup time'''
+        return self.setup_duration() - self.ao_setup_overhead()
+
+    def offsets_overhead(self):
+        '''Time spent executing offsets'''
+        offsets_time = 0
+        for cmd in self.cmds:
+            if cmd.name == 'PauseAO' or cmd.name == 'Pause':
+                pause_time = cmd.start_time
+            if cmd.name == 'ResumeAO' or cmd.name == 'Resume':
+                resume_time = cmd.end_time
+                offsets_time += resume_time - pause_time
+        return offsets_time
+
+    def total_ao_overhead(self):
+        '''Time spent executing AO commands'''
+        return self.ao_setup_overhead() + self.offsets_overhead()
+
 
 
 def detectCompleteObs(cmds):
@@ -669,39 +703,34 @@ def detectCompleteObs(cmds):
     newCmds = []
     for cmd in cmds:
         if cmd.name == 'PresetAO' and cmd.is_instrument_preset():
-            print 'Preset valid'
             inPreset = True
             inObs = False
             obsCmd = CompleteObs(name='CompleteObs', start_time = cmd.start_time)
             obsCmd.wfs = cmd.wfs
-            
+            obsCmd.mode = cmd.mode
+            obsCmd.mag = cmd.mag
+            obsCmd.cmds.append(cmd)
+
+        elif inPreset is True and cmd.name == 'Cancel':
+            inPreset = False
+            inObs = False
+
         elif inObs is True:
-            if cmd.name == 'PauseAO':
-                obsCmd.closeshutter(cmd.start_time)
-            if cmd.name == 'ResumeAO':
-                print('Resume: open shutter',cmd.start_time)
-                obsCmd.openshutter(cmd.start_time)
+            obsCmd.cmds.append(cmd)
             if cmd.name == 'Stop' or cmd.name == 'StopAO':
-                obsCmd.closeshutter(cmd.start_time)
                 obsCmd.end_time = cmd.end_time
                 newCmds.append(obsCmd)
                 inObs = False
 
         elif inPreset is True:
+            obsCmd.cmds.append(cmd)
             if cmd.name == 'StartAO' or cmd.name == 'Start AO':
                 inPreset = False
                 inObs = True
-                print('Start: open shutter',cmd.end_time)
-                obsCmd.openshutter(cmd.end_time)
-                obsCmd.startobs_time = cmd.end_time
 
         newCmds.append(cmd)
 
     return newCmds
-
-
-
-
 
 
 
@@ -1031,10 +1060,8 @@ def update_cmd_csv(cmds, day):
     data = [hdr]+data
 
     # Save csv   
-    print(csvfilename)
     with open(csvfilename, 'wb') as csvfile:
         csv.writer(csvfile, delimiter=',').writerows(data)
-
 
 
 def update_output_csv(cmds, day):
@@ -1059,27 +1086,25 @@ def update_output_csv(cmds, day):
         d = dayStr(cmd.start_time)
         h = hourStr(cmd.start_time)
         tottime = '%d' % cmd.total_time()
-        opentime = '%d' % cmd.open_time()
-        setuptime = '%d' % cmd.setup_time()
-        offsetstime = '%d' % cmd.offsets_time()
+        opentime = '%d' % cmd.total_open_time()
+        setuptime = '%d' % cmd.setup_duration()
+        aosetuptime = '%d' % cmd.ao_setup_overhead()
+        telsetuptime = '%d' % cmd.telescope_overhead()
+        offsetstime = '%d' % cmd.offsets_overhead()
         tottime_h = str(float(tottime)/3600)
         opentime_h = str(float(opentime)/3600)
-        setuptime_h = str(float(setuptime)/3600)
-        offsetstime_h = str(float(offsetstime)/3600)
          
-        row = (d, h, tottime, tottime_h, opentime, opentime_h, setuptime, setuptime_h, offsetstime, offsetstime_h, cmd.wfs)
+        row = (d, h, tottime, tottime_h, opentime, opentime_h, setuptime, aosetuptime, telsetuptime, offsetstime, cmd.wfs, cmd.mode, cmd.mag)
         data.append(row)
 
     data.sort(key=lambda x: x[0])
 
-    hdr = ('day', 'hour', 'time', 'time_h', 'open', 'open_h', 'setup', 'setup_h', 'offsets', 'offsets_h', 'wfs')
+    hdr = ('day', 'hour', 'time', 'time_h', 'open', 'open_h', 'setup', 'aosetup', 'telsetup', 'offsets', 'wfs', 'mode', 'magnitude')
     data = [hdr]+data
 
     # Save csv   
-    print(csvfilename)
     with open(csvfilename, 'wb') as csvfile:
         csv.writer(csvfile, delimiter=',').writerows(data)
-
 
 
 #########
