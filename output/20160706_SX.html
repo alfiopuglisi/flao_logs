@@ -1,0 +1,84 @@
+
+<html>
+<head>
+  <title>AO commands statistics for 20160706</title>
+  <link rel="stylesheet" href="aotable.css">
+</head>
+<body>
+<H1>AO commands statistics for 20160706</H1>
+
+data.csv
+<HR>
+<H2>Complete observations (from PresetAO to StopAO, instrument presets only)</H2>
+<p>Total: 3 - Success rate: 0%</p>
+<p>
+<table id="aotable">
+<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>
+<tr><td>20160706 08:34:34</td><td>CompleteObs</td><td>1140.6 s</td><td style="width: 300px"></td><td>FLAO, open shutter: 848s (74%)</td></tr>
+<tr><td>20160706 09:10:10</td><td>CompleteObs</td><td>343.9 s</td><td style="width: 300px"></td><td>FLAO, open shutter: 92s (26%)</td></tr>
+<tr><td>20160706 09:22:21</td><td>CompleteObs</td><td>1685.3 s</td><td style="width: 300px"></td><td>FLAO, open shutter: 1294s (76%)</td></tr>
+</table>
+
+</p>
+<HR>
+<H2>PresetAO</H2>
+<p>Total: 7 - Success rate: 100%</p>
+<p>
+<table id="aotable">
+<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>
+<tr><td>20160706 08:20:36</td><td>PresetAO</td><td> 84.5 s</td><td style="width: 300px">Success</td><td>FLAO, star mag= 9.0, posXY= 0.1, 0.0 mm<br>Automatic mode</td></tr>
+<tr><td>20160706 08:34:34</td><td>PresetAO</td><td> 48.1 s</td><td style="width: 300px">Success</td><td>FLAO, star mag= 9.0, posXY= 0.1, 0.0 mm<br>Automatic mode</td></tr>
+<tr><td>20160706 08:53:38</td><td>PresetAO</td><td> 40.4 s</td><td style="width: 300px">Success</td><td>FLAO, star mag= 9.0, posXY= 0.0, 0.0 mm<br>Intervention mode</td></tr>
+<tr><td>20160706 09:10:10</td><td>PresetAO</td><td> 39.0 s</td><td style="width: 300px">Success</td><td>FLAO, star mag= 9.0, posXY= 0.0, 0.0 mm<br>Intervention mode</td></tr>
+<tr><td>20160706 09:18:03</td><td>PresetAO</td><td> 40.6 s</td><td style="width: 300px">Success</td><td>FLAO, star mag= 9.0, posXY= 0.0, 0.0 mm<br>Intervention mode</td></tr>
+<tr><td>20160706 09:22:21</td><td>PresetAO</td><td> 38.8 s</td><td style="width: 300px">Success</td><td>FLAO, star mag= 9.0, posXY= 0.0, 0.0 mm<br>Intervention mode</td></tr>
+<tr><td>20160706 09:50:30</td><td>PresetAO</td><td> 40.7 s</td><td style="width: 300px">Success</td><td>FLAO, star mag= 9.0, posXY= 0.0, 0.0 mm<br>Intervention mode</td></tr>
+</table>
+
+</p>
+<HR>
+<H2>Acquire - StartAO sequences</H2>
+<p>Total: 6 - Success rate: 16%</p>
+<p>
+<table id="aotable">
+<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>
+<tr><td>20160706 08:27:16</td><td>Acquire</td><td>Unknown</td><td style="width: 300px">OptimizeGain: FATAL - thSendMessage error(-3606): No connection with MsgD Command not completed</td><td></td></tr>
+<tr><td>20160706 08:36:18</td><td>Acquire</td><td>Unknown</td><td style="width: 300px"> Command not completed</td><td></td></tr>
+<tr><td>20160706 08:55:18</td><td>Acquire</td><td>286.4 s</td><td style="width: 300px">Illegal command for state AOArbitrator.ManualAcquireLoadDisturbTag: WARNING - IDL The disturbance triggered by SC is still running Command not completed</td><td></td></tr>
+<tr><td>20160706 09:11:23</td><td>Acquire</td><td> 38.5 s</td><td style="width: 300px">centerStar: WARNING - RETRY: No stars found in TV frame (-20001) WFSARB_STAR_NOTFOUND Command not completed</td><td></td></tr>
+<tr><td>20160706 09:23:47</td><td>Acquire</td><td>299.9 s</td><td style="width: 300px">Illegal command for state AOArbitrator.ManualAcquire</td><td></td></tr>
+<tr><td>20160706 09:51:54</td><td>Acquire</td><td>357.2 s</td><td style="width: 300px">Success</td><td></td></tr>
+</table>
+
+</p>
+<HR>
+<H2>Pause - Offset - Resume sequences</H2>
+<p>Total: 0 - Success rate: 0%</p>
+<HR>
+<H2>AcquireRefAO</H2>
+<p>Total: 7 - Success rate: 71%</p>
+<p>
+<table id="aotable">
+<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>
+<tr><td>20160706 08:27:16</td><td>AcquireRefAO</td><td>322.4 s</td><td style="width: 300px">OptimizeGain: FATAL - thSendMessage error(-3606): No connection with MsgD</td><td></td></tr>
+<tr><td>20160706 08:35:39</td><td>AcquireRefAO</td><td> 14.5 s</td><td style="width: 300px">centerStar: WARNING - RETRY: No stars found in TV frame (-20001) WFSARB_STAR_NOTFOUND</td><td></td></tr>
+<tr><td>20160706 08:36:18</td><td>AcquireRefAO</td><td>188.1 s</td><td style="width: 300px">Success</td><td></td></tr>
+<tr><td>20160706 08:55:18</td><td>AcquireRefAO</td><td>  0.0 s</td><td style="width: 300px">Success</td><td></td></tr>
+<tr><td>20160706 09:11:23</td><td>AcquireRefAO</td><td>  0.0 s</td><td style="width: 300px">Success</td><td></td></tr>
+<tr><td>20160706 09:23:47</td><td>AcquireRefAO</td><td>299.9 s</td><td style="width: 300px">Success</td><td></td></tr>
+<tr><td>20160706 09:51:54</td><td>AcquireRefAO</td><td>357.2 s</td><td style="width: 300px">Success</td><td></td></tr>
+</table>
+
+</p>
+<HR>
+<H2>StartAO</H2>
+<p>Total: 3 - Success rate: 66%</p>
+<p>
+<table id="aotable">
+<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>
+<tr><td>20160706 08:39:26</td><td>StartAO</td><td>  0.0 s</td><td style="width: 300px">Success</td><td></td></tr>
+<tr><td>20160706 09:14:22</td><td>StartAO</td><td>  0.0 s</td><td style="width: 300px">Illegal command for state AOArbitrator.Ready</td><td></td></tr>
+<tr><td>20160706 09:28:47</td><td>StartAO</td><td>  0.0 s</td><td style="width: 300px">Success</td><td></td></tr>
+</table>
+
+</p>
