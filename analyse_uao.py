@@ -1,85 +1,41 @@
 #!/usr/bin/env python
 
 import csv
-import os, glob, time, getopt, sys, calendar, re, math
-import operator, fileinput
+import os, time, getopt, sys, calendar, re
+import operator, argparse
 
-def usage():
-    print 'Usage:'
-    print 'analyse.py --day=YYYYMMDD --side=[R|L][-v] [--html] [--summary="summary.txt"] --adseclogdir="log directory" [--dataoutdir="data out directory"]'
+parser = argparse.ArgumentParser('UAO log analysis')
+parser.add_argument('day', type=str, help='UTC date YYYYMMDD format')
+parser.add_argument('side', type=str, help='side (R or L)')
+parser.add_argument('logdir', type=str, help='directory where log files are stored')
+parser.add_argument('--html', action='store_true', default=False, help='generate html output')
+parser.add_argument('--outdir', type=str, default='.', help='output directory for csv files (default: %(default)s)')
+parser.add_argument('--verbose', action='store_true', default=False, help='verbose output')
+parser.add_argument('--summary', type=str, help='filename for optional summary in text and twiki format')
+args = parser.parse_args()
 
-try:
-    optlist, args = getopt.getopt( sys.argv[1:], 'v', ['html', 'day=', 'side=', 'summary=', 'adseclogdir=', 'dataoutdir='])
-except getopt.GetoptError, err:
-    print str(err)
-    usage()
-    sys.exit(2)
 
-verbose = False
-html    = False
-summary = None
-logdir = '/aodata/UAO_logs'
-adseclogdir=None
-
-day = None
-side = None
-dataoutdir = ''
-
-for o,a in optlist:
-    if o == '-v':
-        verbose=True
-    elif o in ('-h', '--help'):
-        usage()
-	sys.exit()
-    elif o == '--day':
-        day = a
-    elif o == '--html':
-        html = True
-    elif o == '--summary':
-        summary = a
-    elif o == '--adseclogdir':
-        adseclogdir = a
-    elif o == '--dataoutdir':
-        dataoutdir = a
-    elif o == '--side':
-        side = a
-
-if day is None:
-    print
-    print 'Argument --day=YYYYMMDD is mandatory'
-    print
-    sys.exit(2)
-
-if side is None:
-    print
-    print 'Argument --side=[L|R] is mandatory'
-    print
-    sys.exit(2)
-
-if (side is not 'L') and (side is not 'R'):
-    print
-    print 'Argument --side must be L or R'
-    print
+if args.side not in ['R', 'L']:
+    print()
+    print('Argument --side must be L or R')
+    print()
     sys.exit(2)
 
 
-def logfilename(process, side, day, logdir=None, num=0):
-    y = day[0:4]
-    m = day[4:6]
-    d = day[6:8]
-    path = '%s/%s/%s/%s.%s.%s%04d.log' % (y, m, d, process, side, day, num)
-    if logdir:
-        path = os.path.join(logdir, path)
-    return path
-    
+def logfilename(process, num=0):
+    y = args.day[0:4]
+    m = args.day[4:6]
+    d = args.day[6:8]
+    path = '%s/%s/%s/%s.%s.%s%04d.log' % (y, m, d, process, args.side, args.day, num)
+    return os.path.join(args.logdir, path)
 
 def log_timestamp(line):
     fields = line.split('|')
     timestamp, microsec = fields[3].split('.')
-    return calendar.timegm( time.strptime(timestamp, '%Y-%m-%d %H:%M:%S')) + float(microsec)/1e6
+    return calendar.timegm(time.strptime(timestamp, '%Y-%m-%d %H:%M:%S')) + float(microsec)/1e6
 
 def julianDayFromUnix(timestamp):
-    return ( timestamp / 86400.0 ) + 2440587.5;
+    return (timestamp / 86400.0) + 2440587.5;
 
 def timeStr(t):
     return time.strftime('%Y%m%d %H:%M:%S', time.gmtime(t))
@@ -91,21 +47,16 @@ def hourStr(t):
     return time.strftime('%H:%M:%S', time.gmtime(t))
 
 
-def flux2Mag(flux):
-    refmag = 5.5
-    refflux = 2970000.0
-    return 2.5*math.log10(refflux / flux) + refmag
-
-def logfile( name, side, day, logdir=None, grep=None):
+def logfile(name, grep=None):
     ''''
     Returns a file-like object to read a logfile
     '''
     for n in range(10000):
-        filename= logfilename( name, side, day, logdir=logdir, num=n)
+        filename= logfilename(name, num=n)
         filenamegz = filename+'.gz'
         if os.path.exists(filename):
-            if verbose:
-                print 'Reading: '+filename
+            if args.verbose:
+                print('Reading: '+filename)
             if grep is not None:
                 cmd = 'grep "%s" %s' % (grep, filename)
                 return os.popen(cmd)
@@ -113,8 +64,8 @@ def logfile( name, side, day, logdir=None, grep=None):
                 return file(filename, 'r')
 
         if os.path.exists(filenamegz):
-            if verbose:
-                print 'Reading: '+filenamegz
+            if args.verbose:
+                print('Reading: '+filenamegz)
             if grep is not None:
                 cmd = 'gzip -cd %s | grep "%s"' % (filenamegz, grep)
                 return os.popen(cmd)
@@ -125,9 +76,9 @@ def logfile( name, side, day, logdir=None, grep=None):
     raise Exception('Cannot find log file: '+filename)
 
 
-def search( logdir, name, side, day, string=None, mindiff=1, getDict=False):
+def search(name, string=None, mindiff=1, getDict=False):
 
-    found = logfile(name, side, day, logdir=logdir, grep=string)
+    found = logfile(name, grep=string)
     prev=0
     found2={}
     p = re.compile('\>  \. (.*)')
@@ -135,7 +86,7 @@ def search( logdir, name, side, day, string=None, mindiff=1, getDict=False):
         now = log_timestamp(f)
         if now-prev>= mindiff:
             if not found2.has_key(now):
-	        found2[now] = f.strip()
+                found2[now] = f.strip()
             else:
                 try:
                     fields = f.split('|')
@@ -143,10 +94,10 @@ def search( logdir, name, side, day, string=None, mindiff=1, getDict=False):
                     if m:
                         found2[now] += m.group(1)
                 except IndexError as e:
-                    print 'Malformed line: '+f
+                    print('Malformed line: '+f)
         else:
-            if verbose:
-                print 'Rejected '+f.strip()
+            if args.verbose:
+                print('Rejected '+f.strip())
         prev=now
 
     if getDict:
@@ -156,7 +107,6 @@ def search( logdir, name, side, day, string=None, mindiff=1, getDict=False):
     for k in sorted(found2.keys()):
         found3.append(found2[k])
     return found3
-
 
 
 def myRound(x, ndigits=0):
@@ -331,19 +281,17 @@ class ArbCmd:
                     details.append('Ccd39 binning: %d' % self.hoBinning)
                 if hasattr(self, 'hoSpeed'):
                     details.append('Loop speed: %d Hz' % self.hoSpeed)
-        except Exception, e:
-            print e
-            pass
+        except Exception as e:
+            print(e)
+
         return details
 
 
-def get_AOARB_cmds( side, day):
+def get_AOARB_cmds():
 
     import re
-    aoarb_lines = []
 
-    loggername = 'MAIN'
-    lines = search(adseclogdir, 'AOARB', side, day, string=loggername, mindiff=0)
+    lines = search('AOARB', string='MAIN', mindiff=0)
 
     cmds=[]
     curCmd=None
@@ -351,9 +299,9 @@ def get_AOARB_cmds( side, day):
     startCmdFlao = 'FSM (status'
     startCmdUao = 'Request:'
 
-    p1 =re.compile('Request: (.*?)\((.*)\)')
-    p2 =re.compile('Request: (.*)')
-    p3 =re.compile('has received command \d+ \((.*)\)') # FLAO command
+    p1 = re.compile('Request: (.*?)\((.*)\)')
+    p2 = re.compile('Request: (.*)')
+    p3 = re.compile('has received command \d+ \((.*)\)') # FLAO command
 
     endCmdFlao = ' successfully completed'
     endCmdUao  = 'Status after command:'
@@ -384,38 +332,27 @@ def get_AOARB_cmds( side, day):
             m1 = p1.search(line)
             m2 = p2.search(line)
             m3 = p3.search(line)
-            name = None
             args = ''
-            if m1:
-                try:
+            try:
+                if m1:
                     name = m1.group(1)
                     args = m1.group(2)
-                except IndexError as e:
-                    print 'Malformed request: '+line
-                    continue
-            elif m2:
-                try:
+                elif m2:
                     name = m2.group(1)
-                except IndexError as e:
-                    print 'Malformed request: '+line
-                    continue
-            elif m3:
-                try:
+                elif m3:
                     name = m3.group(1)
-                except IndexError as e:
-                    print 'Malformed request: '+line
+                else:
+                    print('Malformed request: '+line)
                     continue
-            else:
-                print 'Malformed request: '+line
+            except IndexError as e:
+                print('Malformed request: '+line)
                 continue
-            
  
             default_success = None
 
-            curCmd = ArbCmd( name=name, args=args, start_time=t, end_time=None, success=default_success, errstr='')
+            curCmd = ArbCmd(name=name, args=args, start_time=t, end_time=None, success=default_success, errstr='')
             if name == 'AcquireRefAO':
                 lastAcquireRef = curCmd
-
 
         elif (endCmdFlao in line) or (endCmdUao in line):
             t = log_timestamp(line)
@@ -426,8 +363,8 @@ def get_AOARB_cmds( side, day):
             if readyForStartStr in line:
                 if lastAcquireRef is not None:
                     lastAcquireRef.end_time = t
-            continue
-
+            continue  # TODO remove?
+ 
         elif exceptionStr in line:
             pos = line.index(exceptionStr)
             curCmd.errstr = line[pos+len(exceptionStr):].strip()
@@ -460,9 +397,9 @@ def get_AOARB_cmds( side, day):
             pos = line.index(hoSpeedStr)
             curCmd.hoSpeed = int(line[pos+len(hoSpeedStr):].split()[0])
 
-      except Exception, e:
-        if verbose:
-            print e
+      except Exception as e:
+        if args.verbose:
+            print(e)
  
     # Store last command
     if curCmd is not None:
@@ -489,8 +426,7 @@ class CompleteObs(ArbCmd):
 
     def setup_duration(self):
         '''Total setup time from start of PresetAO to end of StartAO'''
-        startao = filter(lambda x: x.name == 'StartAO' or x.name =='Start AO', self.cmds)[0]
-        #print 'Setup duration:',  startao.end_time - self.start_time
+        startao = filter(lambda x: x.name in ['StartAO', 'Start AO'], self.cmds)[0]
         return startao.end_time - self.start_time
 
     def ao_setup_overhead(self):
@@ -499,11 +435,9 @@ class CompleteObs(ArbCmd):
         is_intervention = False
         for cmd in self.cmds:
             if cmd.name in 'CenterStar CenterPupils CheckFlux CloseLoop'.split():
-                #print 'INTERVENTION', cmd.name
                 is_intervention = True
 
         for cmd in self.cmds:
-           # print cmd.name, is_intervention, cmd.start_time, cmd.end_time
             if cmd.name in 'Acquire Done'.split():
                 continue
             if cmd.end_time is None or cmd.start_time is None:
@@ -511,13 +445,10 @@ class CompleteObs(ArbCmd):
             if is_intervention and cmd.name == 'AcquireRefAO': # Avoid double counting acquisition commands
                 continue
 
-           # print timeStr(cmd.start_time), cmd.name, cmd.end_time - cmd.start_time
-
             if cmd.end_time is not None and cmd.start_time is not None:
                 this_cmd_time = cmd.end_time - cmd.start_time
                 ao_time += this_cmd_time
- #               print 'AO setup: ', cmd.name, this_cmd_time, ao_time
-            if cmd.name == 'StartAO' or cmd.name == 'Start AO':
+            if cmd.name in ['StartAO', 'Start AO']:
                 return ao_time
         return 0
 
@@ -529,9 +460,9 @@ class CompleteObs(ArbCmd):
         '''Time spent executing offsets'''
         offsets_time = 0
         for cmd in self.cmds:
-            if cmd.name == 'PauseAO' or cmd.name == 'Pause':
+            if cmd.name in ['PauseAO', 'Pause']:
                 pause_time = cmd.start_time
-            if cmd.name == 'ResumeAO' or cmd.name == 'Resume':
+            if cmd.name in ['ResumeAO', 'Resume']:
                 resume_time = cmd.end_time
                 offsets_time += resume_time - pause_time
         return offsets_time
@@ -566,14 +497,14 @@ def detectCompleteObs(cmds):
 
         elif inObs is True:
             obsCmd.cmds.append(cmd)
-            if cmd.name == 'Stop' or cmd.name == 'StopAO':
+            if cmd.name in ['Stop', 'StopAO']:
                 obsCmd.end_time = cmd.end_time
                 newCmds.append(obsCmd)
                 inObs = False
 
         elif inPreset is True:
             obsCmd.cmds.append(cmd)
-            if cmd.name == 'StartAO' or cmd.name == 'Start AO':
+            if cmd.name in ['StartAO', 'Start AO']:
                 inPreset = False
                 inObs = True
 
@@ -660,7 +591,7 @@ def detectOffsets(cmds):
 
            t0 = cmds[n+0].start_time
            t1 = cmds[n+2].end_time
-           success = reduce( operator.and_, [x.success for x in cmds[n:n+3]])
+           success = reduce(operator.and_, [x.success for x in cmds[n:n+3]])
            errstr = ' '.join([x.errstr for x in cmds[n:n+3]])
            args = cmds[n+1].args
 
@@ -673,7 +604,7 @@ def detectOffsets(cmds):
 
            t0 = cmds[n+0].start_time
            t1 = cmds[n+1].end_time
-           success = reduce( operator.and_, [x.success for x in cmds[n:n+2]])
+           success = reduce(operator.and_, [x.success for x in cmds[n:n+2]])
            errstr = ' '.join([x.errstr for x in cmds[n:n+2]])
            args = cmds[n+1].args
 
@@ -722,26 +653,26 @@ def outputEvents(title, events, sort=True):
     else:
         sortedEvents = events
 
-    if not html:
-        print
-        print title
+    if not args.html:
+        print()
+        print(title)
 
-        print 'Total: %d' % len(sortedEvents)
+        print('Total: %d' % len(sortedEvents))
         for e in sortedEvents:
-             print '%s %s %s' % (timeStr(e.t), e.name, e.details)
+             print('%s %s %s' % (timeStr(e.t), e.name, e.details))
 
     else:
-	print '<HR>'
-        print '<H2>%s</H2>' % title
-	print '<p>Total: %d</p>' % len(sortedEvents)
-	if len(sortedEvents)>0:
-            print '<table id="aotable">'
-            print sortedEvents[0].htmlHeader()
+        print('<HR>')
+        print('<H2>%s</H2>' % title)
+        print('<p>Total: %d</p>' % len(sortedEvents))
+        if len(sortedEvents)>0:
+            print('<table id="aotable">')
+            print(sortedEvents[0].htmlHeader())
             for e in sortedEvents:
-                print e.htmlRow()
-            print '</table>'
+                print(e.htmlRow())
+            print('</table>')
         else:
-            print '<p>'
+            print('<p>')
 
 
 def output_cmd(title, found, cmd_code='1'):
@@ -751,39 +682,39 @@ def output_cmd(title, found, cmd_code='1'):
     if len(found)>0:
         success_rate = float(success) / len(found)
 
-    if not html:
-        print
-        print title
+    if not args.html:
+        print()
+        print(title)
 
-        print 'Total: %d - Success rate: %d%%' % (len(found), int(success_rate*100))
+        print('Total: %d - Success rate: %d%%' % (len(found), int(success_rate*100)))
         for f in found:
-             print f.report()
+             print(f.report())
 
     else:
-	print '<HR>'
-        print '<H2>%s</H2>' % title
-	print '<p>Total: %d - Success rate: %d%%</p>' % (len(found), int(success_rate*100))
-	if len(found)>0:
-	    print '<p>'
-	    print '<table id="aotable">'
-	    print '<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>'
+        print('<HR>')
+        print('<H2>%s</H2>' % title)
+        print('<p>Total: %d - Success rate: %d%%</p>' % (len(found), int(success_rate*100)))
+        if len(found)>0:
+            print('<p>')
+            print('<table id="aotable">')
+            print('<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>')
         for cmd in found:
-	     strtime = timeStr( cmd.start_time)
-             if (cmd.end_time is not None) and (cmd.start_time is not None):
-                 elapsed = '%5.1f s' % (cmd.end_time - cmd.start_time,)
-             else:
-                 elapsed = 'Unknown'
-             if cmd.success is True:
-                 errstr = 'Success'
-             else:
-                 errstr = cmd.errorString()
-             print '<tr><td>%s</td><td>%s</td><td>%s</td><td style="width: 300px">%s</td><td>%s</td></tr>' % (strtime, cmd.name, elapsed, errstr, '<br>'.join(cmd.details()))
-	if len(found)>0:
-	    print '</table>\n'
-	    print '</p>'
+            strtime = timeStr( cmd.start_time)
+            if (cmd.end_time is not None) and (cmd.start_time is not None):
+                elapsed = '%5.1f s' % (cmd.end_time - cmd.start_time,)
+            else:
+                elapsed = 'Unknown'
+            if cmd.success is True:
+                errstr = 'Success'
+            else:
+                errstr = cmd.errorString()
+            print('<tr><td>%s</td><td>%s</td><td>%s</td><td style="width: 300px">%s</td><td>%s</td></tr>' % (strtime, cmd.name, elapsed, errstr, '<br>'.join(cmd.details())))
+        if len(found)>0:
+            print('</table>\n')
+            print('</p>')
 
-    if dataoutdir != '':
-       fileout = os.path.join(dataoutdir,'data')
+    if args.outdir != '':
+       fileout = os.path.join(args.outdir,'data')
        f = file(fileout,'a+')
        for cmd in found:
           code = -cmd_code
@@ -795,9 +726,9 @@ def output_cmd(title, found, cmd_code='1'):
     return success_rate
 
 
-def update_cmd_csv(cmds, day):
+def update_cmd_csv(cmds):
 
-    csvfilename = os.path.join(dataoutdir, 'cmd_%s.csv' % side)
+    csvfilename = os.path.join(args.outdir, 'cmd_%s.csv' % args.side)
     # read csv
     if os.path.exists(csvfilename):
         with open(csvfilename, 'rb') as csvfile:
@@ -809,7 +740,7 @@ def update_cmd_csv(cmds, day):
         return
 
     # Remove anything matching this day/cmd (assumes all cmds are equal)
-    data = filter(lambda row: (row[0] != day) or (row[2] != cmds[0].name), data)
+    data = filter(lambda row: (row[0] != args.day) or (row[2] != cmds[0].name), data)
 
     # Remove header if any
     data = filter(lambda row: row[0] != 'day', data)
@@ -837,9 +768,9 @@ def update_cmd_csv(cmds, day):
         csv.writer(csvfile, delimiter=',').writerows(data)
 
 
-def update_output_csv(cmds, day):
+def update_output_csv(cmds):
 
-    csvfilename = os.path.join(dataoutdir, 'data_%s.csv' % side)
+    csvfilename = os.path.join(args.outdir, 'data_%s.csv' % args.side)
 
     # read csv
     if os.path.exists(csvfilename):
@@ -849,7 +780,7 @@ def update_output_csv(cmds, day):
         data = []
 
     # Remove anything matching this day
-    data = filter(lambda row: row[0] != day, data)
+    data = filter(lambda row: row[0] != args.day, data)
 
     # Remove header if any
     data = filter(lambda row: row[0] != 'day', data)
@@ -880,14 +811,12 @@ def update_output_csv(cmds, day):
         csv.writer(csvfile, delimiter=',').writerows(data)
 
 
-#########
+##################
+# Text/html output
 
-table = {}
-success = {}
-
-if html:
-    htmltitle = 'AO commands statistics for %s' % day
-    print '''
+if args.html:
+    htmltitle = 'AO commands statistics for %s' % args.day
+    print('''
 <html>
 <head>
   <title>%s</title>
@@ -895,292 +824,110 @@ if html:
 </head>
 <body>
 <H1>%s</H1>
-''' % (htmltitle, htmltitle)
+''' % (htmltitle, htmltitle))
 
 
-AOARB_cmds = get_AOARB_cmds( side, day)
-AOARB_cmds = detectOffsets( AOARB_cmds)
-AOARB_cmds = detectAcquires( AOARB_cmds)
-AOARB_cmds = detectCompleteObs( AOARB_cmds)
+AOARB_cmds = get_AOARB_cmds()
+AOARB_cmds = detectOffsets(AOARB_cmds)
+AOARB_cmds = detectAcquires(AOARB_cmds)
+AOARB_cmds = detectCompleteObs(AOARB_cmds)
 
-update_output_csv(cmdsByName(AOARB_cmds, 'CompleteObs'), day)
+update_output_csv(cmdsByName(AOARB_cmds, 'CompleteObs'))
 
-update_cmd_csv(cmdsByName(AOARB_cmds, 'PresetAO'), day)
-update_cmd_csv(cmdsByName(AOARB_cmds, 'CenterStar'), day)
-update_cmd_csv(cmdsByName(AOARB_cmds, 'CenterPupils'), day)
-update_cmd_csv(cmdsByName(AOARB_cmds, 'CheckFlux'), day)
-update_cmd_csv(cmdsByName(AOARB_cmds, 'CloseLoop'), day)
-update_cmd_csv(cmdsByName(AOARB_cmds, 'OptimizeGain'), day)
-update_cmd_csv(cmdsByName(AOARB_cmds, 'ApplyOpticalGain'), day)
-update_cmd_csv(cmdsByName(AOARB_cmds, 'OffsetXY'), day)
+update_cmd_csv(cmdsByName(AOARB_cmds, 'PresetAO'))
+update_cmd_csv(cmdsByName(AOARB_cmds, 'CenterStar'))
+update_cmd_csv(cmdsByName(AOARB_cmds, 'CenterPupils'))
+update_cmd_csv(cmdsByName(AOARB_cmds, 'CheckFlux'))
+update_cmd_csv(cmdsByName(AOARB_cmds, 'CloseLoop'))
+update_cmd_csv(cmdsByName(AOARB_cmds, 'OptimizeGain'))
+update_cmd_csv(cmdsByName(AOARB_cmds, 'ApplyOpticalGain'))
+update_cmd_csv(cmdsByName(AOARB_cmds, 'OffsetXY'))
 
-##########
+table = {}
+success = {}
 
-string = 'CompleteObs'
-title = 'Complete observations (from PresetAO to StopAO, instrument presets only)'
-
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=1)
-table['preset'] = len(found)
-success['preset'] = success_rate
-
-##########
-
-string = 'PresetAO'
-title = 'PresetAO'
-
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=1)
-table['preset'] = len(found)
-success['preset'] = success_rate
-
-##########
-
-string = 'Acquire'
-title  = 'Acquire - StartAO sequences'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=13)
-table['acquire'] = len(found)
-success['acquire'] = success_rate
-
-##########
-
-string = 'Offset'
-title  = 'Pause - Offset - Resume sequences'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=15)
-table['offset'] = len(found)
-success['offset'] = success_rate
-
-
-##########
-
-string = 'AcquireRefAO'
-title =  'AcquireRefAO'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=2)
-table['acquireref'] = len(found)
-success['acquireref'] = success_rate
-
-##########
-
-string = 'StartAO'
-title  = 'StartAO'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=3)
-table['startao'] = len(found)
-success['startao'] = success_rate
-
-##########
-
-string = 'CenterStar'
-title  = 'CenterStar'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=3)
-table['centerstar'] = len(found)
-success['centerstar'] = success_rate
-
-##########
-
-string = 'CenterPupils'
-title  = 'CenterPupils'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=3)
-table['centerpupils'] = len(found)
-success['centerpupils'] = success_rate
-
-##########
-
-string = 'CheckFlux'
-title  = 'CheckFlux'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=3)
-table['checkflux'] = len(found)
-success['checkflux'] = success_rate
-
-##########
-
-string = 'CloseLoop'
-title  = 'CloseLoop'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=3)
-table['closeloop'] = len(found)
-success['closeloop'] = success_rate
-
-##########
-
-string = 'OptimizeGain'
-title  = 'OptimizeGain'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=3)
-table['optimizegain'] = len(found)
-success['optimizegain'] = success_rate
-
-##########
-
-string = 'ApplyOpticalGain'
-title  = 'ApplyOpticalGain'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=3)
-table['applyopticalgain'] = len(found)
-success['applyopticalgain'] = success_rate
-
-#########
-#
-# Events
-#
+################
+# Events report
 
 events = []
 
-name = 'AOARB'
-string = ' - SkipFrame'
+for key, name, string, klass in [
+        ('skip', 'AOARB', ' - SkipFrame', SkipFrameEvent)
+        ('fail', 'fastdiagn', 'Failing actuator detected', FailedActuatorEvent),
+        ('fastRIP', 'fastdiagn', 'FUNCTEMERGENCYST', RIPEvent),
+        ('housekeeperRIP', 'housekeeper', 'FUNCTEMERGENCYST', RIPEvent),
+        ]:
 
-found = search( adseclogdir, name, side, day, string, mindiff=120)
-events += map( SkipFrameEvent.fromLogLine, found)
-table['skip'] = len(found)
-
-#########
-
-name = 'fastdiagn'
-string = 'Failing actuator detected'
-
-found = search( adseclogdir, name, side, day, string, mindiff=120)
-events += map( FailedActuatorEvent.fromLogLine, found)
-table['skip'] = len(found)
-
-##########
-
-name = 'fastdiagn'
-string = 'FUNCTEMERGENCYST'
-
-found = search( adseclogdir, name, side, day, string, mindiff=120)
-events += map( RIPEvent.fromLogLine, found)
-table['fastRIP'] = len(found)
-
-########
-
-name = 'housekeeper'
-string = 'FUNCTEMERGENCYST'
-
-found = search( adseclogdir, name, side, day, string, mindiff=120)
-events += map( RIPEvent.fromLogLine, found)
-table['housekeeperRIP'] = len(found)
+    found = search(name, string, mindiff=120)
+    events += map(klass.fromLogLine, found)
+    table[key] = len(found)
 
 
-title = 'Events'
-outputEvents( title, events, sort=True)
+outputEvents('Events', events, sort=True)
 
-###########################################
 
-string = 'OffsetXY'
-title  = 'OffsetXY'
 
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=4)
-table['offsetxy'] = len(found)
-success['offsetxy'] = success_rate
+###################
+# Commmands summary
 
-##########
+for key, cmd_code, string, title in [
+        ('complete',   1,  'CompleteObs',  'Complete observations (from PresetAO to StopAO, instrument presets only)'),
+        ('preset',     1,  'PresetAO',     'PresetAO'),
+        ('acquire',    13, 'Acquire',      'Acquire - StartAO sequences'),
+        ('offset',     15, 'Offset',       'Pause - Offset - Resume sequences'),
+        ('acquireref', 2,  'AcquireRefAO', 'AcquireRefAO'),
+        ('startao',    3,  'StartAO',      'StartAO'),
+        ('centerstar', 3,  'CenterStar',   'CenterStar'),
+        ('centerpupils',3, 'CenterPupils', 'CenterPupils'),
+        ('checkflux',  3,  'CheckFlux',    'CheckFlux'),
+        ('closeloop',  3,  'CloseLoop',    'CloseLoop'),
+        ('optimizegain',3, 'OptimizeGain', 'OptimizeGain'),
+        ('applyopticalgain', 3, 'ApplyOpticalGain', 'ApplyOpticalGain'),
+        ('offsetxy',   4,  'OffsetXY',     'OffsetXY'),
+        ('offsetz',    5,  'OffsetZ',      'OffsetZ'),
+        ('pause',      8,  'Pause',        'Pause'),
+        ('resume',     9,  'Resume',       'Resume'),
+        ('poweron',    7,  'PowerOnAdSec', 'PowerOnAdSec'),
+        ('loadshape',  14, 'PresetFlat',   'PresetFlat'),
+        ('rest',       15, 'MirrorRest',   'MirroRest'),
+        ]:
 
-string = 'OffsetZ'
-title  = 'OffsetZ'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=5)
-table['offsetz'] = len(found)
-success['offsetz'] = success_rate
-
-##########
-
-string = 'Pause'
-title  = 'Pause'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=8)
-table['loadshape'] = len(found)
-success['loadshape'] = success_rate
-
-##########
-
-string = 'Resume'
-title  = 'Resume'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=9)
-table['loadshape'] = len(found)
-success['loadshape'] = success_rate
-
-##########
-
-string = 'PowerOnAdSec'
-title  = 'PowerOnAdsec'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=7)
-table['loadshape'] = len(found)
-success['loadshape'] = success_rate
-
-##########
-
-string = 'PresetFlat'
-title  = 'PresetFlat'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=14)
-table['loadshape'] = len(found)
-success['loadshape'] = success_rate
-
-##########
-
-string = 'MirrorRest'
-title  = 'MirrorRest'
-
-found = cmdsByName( AOARB_cmds, string)
-success_rate = output_cmd( title, found, cmd_code=15)
-table['loadshape'] = len(found)
-success['loadshape'] = success_rate
+    found = cmdsByName(AOARB_cmds, string)
+    success_rate = output_cmd(title, found, cmd_code=cmd_code)
+    table[key] = len(found)
+    success[key] = success_rate
 
 
 #######
 
-if html:
-    print '''
+if args.html:
+    print('''
 </body>
 </html>
-'''
+''')
 
-if summary:
-    fsummary = file(summary+".txt", 'w')
-    fsummary.write('Preset: %d - Acquire: %d - Cloop: %d - total RIPs: %d - msgd Block: %d' %
-                   (table['preset'], table['acquireref'], table['startao'], table['totalRIP'], table['msgdBlock']))
+if args.summary:
+
+    table['totalRIP'] = table['fastRIP'] +  table['housekeeperRIP']
+
+    fsummary = file(args.summary+".txt", 'w')
+    fsummary.write('Preset: %d - Acquire: %d - Cloop: %d - total RIPs: %d' %
+                   (table['preset'], table['acquireref'], table['startao'], table['totalRIP']))
     fsummary.close()
 
-    fsummary = file(summary+".twiki", 'w')
+    fsummary = file(args.summary+".twiki", 'w')
     percent_preset = ''
     percent_acquireref = ''
     percent_startao = ''
-    if table['preset']>0:
+    if table['preset'] > 0:
         percent_preset = '(%d%%)' % int(success['preset']*100)
-    if table['acquireref']>0:
+    if table['acquireref'] > 0:
         percent_acquireref = '(%d%%)' % int(success['acquireref']*100)
-    if table['startao']>0:
+    if table['startao'] > 0:
         percent_startao = '(%d%%)' % int(success['startao']*100)
        
-    fsummary.write('| %d %s | %d %s | %d %s | %d | %d | %d |' %
-                   (table['preset'], percent_preset, table['acquireref'], percent_acquireref, table['startao'], percent_startao, table['totalRIP'],
-		   table['slopecomp'], table['msgdBlock']))
+    fsummary.write('| %d %s | %d %s | %d %s | %d |' %
+                   (table['preset'], percent_preset, table['acquireref'], percent_acquireref, table['startao'], percent_startao, table['totalRIP']))
     fsummary.close()
 
 
