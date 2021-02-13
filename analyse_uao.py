@@ -6,10 +6,10 @@ import operator, fileinput
 
 def usage():
     print 'Usage:'
-    print 'analyse.py --day=YYYYMMDD --side=[R|L][-v] [--html] [--flao] [--summary="summary.txt"] [--wfslogdir="log directory"] [--adseclogdir="log directory"] [--dataoutdir="data out directory"]'
+    print 'analyse.py --day=YYYYMMDD --side=[R|L][-v] [--html] [--summary="summary.txt"] --adseclogdir="log directory" [--dataoutdir="data out directory"]'
 
 try:
-    optlist, args = getopt.getopt( sys.argv[1:], 'v', ['html', 'flao', 'day=', 'side=', 'summary=', 'wfslogdir=', 'adseclogdir=', 'dataoutdir='])
+    optlist, args = getopt.getopt( sys.argv[1:], 'v', ['html', 'day=', 'side=', 'summary=', 'adseclogdir=', 'dataoutdir='])
 except getopt.GetoptError, err:
     print str(err)
     usage()
@@ -17,10 +17,8 @@ except getopt.GetoptError, err:
 
 verbose = False
 html    = False
-flao    = False
 summary = None
 logdir = '/aodata/UAO_logs'
-wfslogdir=None
 adseclogdir=None
 
 day = None
@@ -39,17 +37,12 @@ for o,a in optlist:
         html = True
     elif o == '--summary':
         summary = a
-    elif o == '--wfslogdir':
-        wfslogdir = a
     elif o == '--adseclogdir':
         adseclogdir = a
     elif o == '--dataoutdir':
         dataoutdir = a
     elif o == '--side':
         side = a
-    elif o == '--flao':
-        flao = True
-
 
 if day is None:
     print
@@ -70,65 +63,11 @@ if (side is not 'L') and (side is not 'R'):
     sys.exit(2)
 
 
-
-def lookup_flao_logs(logdir, name, day):
-    '''Returns a list of log files for the specified day'''
-
-    start = calendar.timegm(time.strptime(day+' 000000', '%Y%m%d %H%M%S'))
-    end   = calendar.timegm(time.strptime(day+' 235959', '%Y%m%d %H%M%S'))
-
-    pattern = os.path.join(logdir, name)+'*log*'
-    files = glob.glob(pattern)
-    ret = []
-    prev_file= ''
-    done_prev = False
-    done_next = False
-    for file in sorted(files):
-        parts = file.split('.')
-        try:
-            if parts[-1] == 'gz':
-                timestamp = int(parts[-3])
-            else:
-                timestamp = int(parts[-2])
-        except:
-            continue
-
-        if timestamp >= start and not done_prev:
-            ret.append(prev_file)
-            done_prev = True
-            ret.append(file)
-        elif timestamp >= start and timestamp <= end:
-            if not done_prev:
-                ret.append(prev_file)
-                done_prev = True
-            ret.append(file)
-        elif timestamp > end:
-            if not done_next:
-                ret.append(file)
-                done_next = True
-
-        prev_file = file
-
-    return filter(lambda x:x!='', ret)
-
-def chain_logfiles(logfiles, grep=None):
-
-   f = fileinput.input(files=logfiles, openhook=fileinput.hook_compressed)
-
-   for line in f:
-       if grep is not None and grep not in line:
-           continue
-       yield line
-
-
 def logfilename(process, side, day, logdir=None, num=0):
     y = day[0:4]
     m = day[4:6]
     d = day[6:8]
-    if process=='pyarg':
-        path = '%s/%s/%s/%s.%s%04d.log' % (y, m, d, process, day, num)
-    else:
-        path = '%s/%s/%s/%s.%s.%s%04d.log' % (y, m, d, process, side, day, num)
+    path = '%s/%s/%s/%s.%s.%s%04d.log' % (y, m, d, process, side, day, num)
     if logdir:
         path = os.path.join(logdir, path)
     return path
@@ -161,11 +100,6 @@ def logfile( name, side, day, logdir=None, grep=None):
     ''''
     Returns a file-like object to read a logfile
     '''
-
-    if flao:
-        logfiles = lookup_flao_logs(logdir, name, day)
-        return chain_logfiles(logfiles, grep=grep)
-
     for n in range(10000):
         filename= logfilename( name, side, day, logdir=logdir, num=n)
         filenamegz = filename+'.gz'
@@ -193,7 +127,7 @@ def logfile( name, side, day, logdir=None, grep=None):
 
 def search( logdir, name, side, day, string=None, mindiff=1, getDict=False):
 
-    found = logfile( name, side, day, logdir=logdir, grep=string)
+    found = logfile(name, side, day, logdir=logdir, grep=string)
     prev=0
     found2={}
     p = re.compile('\>  \. (.*)')
@@ -223,6 +157,8 @@ def search( logdir, name, side, day, string=None, mindiff=1, getDict=False):
         found3.append(found2[k])
     return found3
 
+
+
 def myRound(x, ndigits=0):
     '''Returns a rounded number where -0.0 is set to 0'''
     y = round(x, ndigits)
@@ -244,7 +180,6 @@ class Event:
         return '<tr><td>%s</td><td>%s</td><td>%s</td></tr>' % ( timeStr(self.t), self.name, self.details)
 
 
-
 class SkipFrameEvent(Event):
     def __init__(self, t, details=''):
         Event.__init__( self, 'SkipFrame', t, details)
@@ -255,6 +190,7 @@ class SkipFrameEvent(Event):
         line = line.replace('->', '--') # Avoid extra ">"
         log, msg = line.split('>')
         return SkipFrameEvent( t, msg)
+
 
 class FailedActuatorEvent(Event):
     def __init__(self, t, details, actno=None):
@@ -288,16 +224,6 @@ class RIPEvent(Event):
             return RIPEvent( t, 'Detected by %s' % procname)
         except ValueError:
             return RIPEvent( t, '')
-
-class SCTimeoutEvent(Event):
-    def __init__(self, t, details):
-        Event.__init__( self, 'Slope computer timeout', t, details)
-
-    @staticmethod
-    def fromLogLine(line):
-        t = log_timestamp(line)
-        return SCTimeout( t, '')
-
 
 
 class ArbCmd:
@@ -366,14 +292,6 @@ class ArbCmd:
                     return ['']
 
             if self.name == 'PresetAO':
-
-                if flao:
-                    self.wfs = 'FLAO'
-                    self.mag = 8
-                    self.refX = 0.1
-                    self.refY = 0.1
-                    return ['']
-
                 wfs = re.findall( self.wfsPattern, self.args)[0]
                 mag = float(re.findall( self.magPattern, self.args)[0])
                 refX = float(re.findall( self.refXPattern, self.args)[0])
@@ -419,72 +337,13 @@ class ArbCmd:
         return details
 
 
-def search_arb_cmd( logdir, name, side, day, cmd, mindiff=1):
-
-    lines = search( logdir, name, side, day, 'COMMANDHANDLER', mindiff=0)
-
-    cmds=[]
-    curCmd = False
-    for line in lines:
-        if curCmd is not None:
-            curCmd.end_time = log_timestamp(line)
-	    if "successfully completed" in line:
-	        curCmd.success = True
-	    if "Command execution failed" in line:
-	        curCmd.success = False
-		# Search for error cause
-		cause = search( dir, name, cur_cmd, log_timestamp(line), 'error',mindiff=0)
-		if len(cause)==0:
-		    cause = search( dir, name, cur_cmd, log_timestamp(line), 'failed',mindiff=0)
-		if len(cause)>0:
-                    curCmd.errstr = cause[0][64:]
-		else:
-                    curCmd.errstr = 'Cannot detect reason'
-	    if "Fsm is discarding" in line:
-                curCmd.errstr = 'Rejected by FSM'
-	    if "status RETRY" in line:
-	        pos = line.find('errstr')
-                curCmd.errstr = line[pos+7:-1]
-            cmds.append(curCmd)
-	    curCmd = False
-	    continue
-
-        if cmd in line:
-            name = cmd
-            args = None
-            t = log_timestamp(line)
-            curCmd = ArbCmd( name=name, args=args, start_time=t, end_time=None, success=None, errstr='')
-
-    return cmds
-
-
-def mix_lines(lines1, lines2):
-
-     return sorted(lines1 + lines2, key=log_timestamp)
-
 def get_AOARB_cmds( side, day):
 
     import re
     aoarb_lines = []
-    pywfs_lines = []
 
     loggername = 'MAIN'
-    if flao:
-       loggername = 'COMMANDHANDLER'
-
-    if adseclogdir:
-       aoarb_lines = search( adseclogdir, 'AOARB', side, day, string=loggername, mindiff=0)
-       # Use dummy wfs lines when running on the adsec
-#       if not wfslogdir:
-#          pywfs_lines= search( adseclogdir, 'pinger', side, day, 'MAIN', mindiff=0)
-
-#    if wfslogdir:
-#       pywfs_lines = search( wfslogdir, 'pyarg', side, day, 'MAIN', mindiff=0)
-#
-
-
-    lines = mix_lines(list(aoarb_lines), list(pywfs_lines))
-
+    lines = search(adseclogdir, 'AOARB', side, day, string=loggername, mindiff=0)
 
     cmds=[]
     curCmd=None
@@ -552,8 +411,6 @@ def get_AOARB_cmds( side, day):
             
  
             default_success = None
-            if flao:
-                default_success = False
 
             curCmd = ArbCmd( name=name, args=args, start_time=t, end_time=None, success=default_success, errstr='')
             if name == 'AcquireRefAO':
@@ -606,7 +463,6 @@ def get_AOARB_cmds( side, day):
       except Exception, e:
         if verbose:
             print e
-             
  
     # Store last command
     if curCmd is not None:
@@ -614,12 +470,6 @@ def get_AOARB_cmds( side, day):
 
     return cmds
 
-
-
-class Interval:
-    def __init__(self, start, end):
-        self.start = start
-        self.end = end
 
 class CompleteObs(ArbCmd):
 
@@ -691,7 +541,6 @@ class CompleteObs(ArbCmd):
         return self.ao_setup_overhead() + self.offsets_overhead()
 
 
-
 def detectCompleteObs(cmds):
     '''
     Detect a complete observations series: PresetAO, Acquire,
@@ -731,7 +580,6 @@ def detectCompleteObs(cmds):
         newCmds.append(cmd)
 
     return newCmds
-
 
 
 def detectAcquires(cmds):
@@ -856,42 +704,13 @@ def detectOffsets(cmds):
         newCmds.append(cmds[n])
 
     return newCmds
-        
 
 
 def cmdsByName(cmds, name):
-    return filter( lambda x: x.name == name, cmds)
+    return filter(lambda x: x.name == name, cmds)
 
 
-def output(name, title, found, code=0):
-
-    if not html:
-        print
-        print title
-
-        print 'Total: %d' % len(found)
-        for f in found:
-             print f
-
-    else:
-	print '<HR>'
-        print '<H2>%s</H2>' % title
-	print '<p>Total: %d</p>' % len(found)
-	if len(found)>0:
-	    print '<p>'
-        for f in found:
-             print f+'<br>'
-	if len(found)>0:
-	    print '</p>'
-
-    if dataoutdir != '':
-       fileout = os.path.join(dataoutdir,'data')
-       f = file(fileout,'a+')
-       for line in found:
-          f.write('%f %d\n' % (julianDayFromUnix(log_timestamp(line)), code))
-       f.close()
-
-def outputEvents( title, events, sort=True):
+def outputEvents(title, events, sort=True):
 
     if sort:
         ev = {}
@@ -924,54 +743,8 @@ def outputEvents( title, events, sort=True):
         else:
             print '<p>'
 
-def output(name, title, found, code=0):
 
-    if not html:
-        print
-        print title
-
-        print 'Total: %d' % len(found)
-        for f in found:
-             print f
-
-    else:
-	print '<HR>'
-        print '<H2>%s</H2>' % title
-	print '<p>Total: %d</p>' % len(found)
-	if len(found)>0:
-	    print '<p>'
-        for f in found:
-             print f+'<br>'
-	if len(found)>0:
-	    print '</p>'
-
-    if dataoutdir != '':
-       fileout = os.path.join(dataoutdir,'data')
-       f = file(fileout,'a+')
-       for line in found:
-          f.write('%f %d\n' % (julianDayFromUnix(log_timestamp(line)), code))
-       f.close()
-
-def output_value(name, filename, found, pattern, func=None):
-
-    values={}
-    for f in found:
-        values[f]=0
-        v = re.search(pattern, f)
-        if v:
-            values[f] = float(v.groups()[0])
-            if func != None:
-                values[f] = func(values[f])
-
-    if dataoutdir != '':
-       fileout = os.path.join(dataoutdir, filename)
-       f = file(fileout,'a+')
-       for line in found:
-          f.write('%f %f\n' % (julianDayFromUnix(log_timestamp(line)), values[line]))
-       f.close()
-
-
-def output_cmd( title, found, cmd_code='1'):
+def output_cmd(title, found, cmd_code='1'):
 
     success = len(filter(lambda x: x.success, found))
     success_rate = 0
@@ -1264,62 +1037,6 @@ success_rate = output_cmd( title, found, cmd_code=3)
 table['applyopticalgain'] = len(found)
 success['applyopticalgain'] = success_rate
 
-##########
-
-if wfslogdir:
-    name = 'pyarg'
-    string = 'Flux: '
-    filename  = 'mag'
-
-    found = search( wfslogdir, name, side, day, string)
-    output_value( name, filename, found, 'Flux: (\d+)', flux2Mag)
-
-##########
-
-if wfslogdir:
-    name = 'wfsarb'
-    string = 'starMag ='
-    filename  = 'presetmag'
-
-    found = search( wfslogdir, name, side, day, string)
-    output_value( name, filename, found, 'starMag = ([\d\.]+)')
-
-##########
-#
-# Should be already included in RIPs detected
-# by fastdiagnostic and housekeeper
-#
-#name = 'adsecarb'
-#string = 'COILS DISABLED'
-#title  = 'Shell RIP (any cause)'
-#
-#found = search( adseclogdir, name, side, day, string, mindiff=120)
-#output( name, title, found, -7)
-#table['totalRIP'] = len(found)
-#
-#########
-
-name = 'M_FLAOWFS'
-string = 'M_ADSEC: EXCD_BLOCK_ERROR'
-title  = 'Peering stop msgd WFS -> ADSEC'
-
-found=[]
-#found = search( wfslogdir, name, side, day, string)
-#output( name, title, found)
-table['msgdBlock'] = len(found)
-
-
-#########
-
-name = 'M_ADSEC'
-string = 'M_FLAOWFS: EXCD_BLOCK_ERROR'
-title  = 'Peering stop msgd ADSEC -> WFS'
-
-found=[]
-#found = search( wfslogdir, name, side, day, string)
-#output( name, title, found)
-table['msgdBlock'] += len(found)
-
 #########
 #
 # Events
@@ -1361,23 +1078,11 @@ found = search( adseclogdir, name, side, day, string, mindiff=120)
 events += map( RIPEvent.fromLogLine, found)
 table['housekeeperRIP'] = len(found)
 
-##########
-
-if wfslogdir:
-    name = 'pyarg'
-    string = 'AdOptError: Timeout waiting for slopecompctrl'
-
-    found = search( wfslogdir, name, side, day, string)
-    events += map( SCTimeoutEvent.fromLogLine, found)
-    table['slopecomp'] = len(found)
-
-
-
 
 title = 'Events'
 outputEvents( title, events, sort=True)
 
-##########
+###########################################
 
 string = 'OffsetXY'
 title  = 'OffsetXY'
@@ -1447,33 +1152,6 @@ success_rate = output_cmd( title, found, cmd_code=15)
 table['loadshape'] = len(found)
 success['loadshape'] = success_rate
 
-##########
-
-if wfslogdir:
-
-   name = 'pinger'
-   string1 = 'Host ts8dx47: -1'
-   string2 = 'Host ts8dx47: 3'
-   title  = 'TS8 DX stops'
-
-   found1 = search( wfslogdir, name, side, day, string1, mindiff=120, getDict=True)
-   found2 = search( wfslogdir, name, side, day, string2, mindiff=120, getDict=True)
-   v = {}
-   for k in found1.keys():
-       v[k] = 0
-   for k in found2.keys():
-       v[k] = 1
-   found = []
-   vv = 0
-   off = None
-   for k in v.keys():
-       if vv==0 and v[k]==0:
-           off = k
-       if vv==0 and v[k]==1:
-           found.append( v[k] + ' - %d seconds' % int(k-off))
-       vv = v[k]
-	
-   output( name, title, found, -10)
 
 #######
 
@@ -1482,7 +1160,6 @@ if html:
 </body>
 </html>
 '''
-
 
 if summary:
     fsummary = file(summary+".txt", 'w')
