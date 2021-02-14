@@ -3,6 +3,7 @@
 import csv
 import os, time, getopt, sys, calendar, re
 import operator, argparse
+from functools import reduce
 
 parser = argparse.ArgumentParser('UAO log analysis')
 parser.add_argument('day', type=str, help='UTC date YYYYMMDD format')
@@ -84,7 +85,7 @@ def search(name, string=None, mindiff=1, getDict=False):
     for f in found:
         now = log_timestamp(f)
         if now-prev>= mindiff:
-            if not found2.has_key(now):
+            if not now in found2:
                 found2[now] = f.strip()
             else:
                 try:
@@ -191,15 +192,15 @@ class ArbCmd:
         self.modePattern = 'mode = (\w+)'
  
     def report(self):
-        timeStr = timeStr( self.start_time)
+        time_str = timeStr(self.start_time)
         if self.success is True:
-            successStr = 'Success'
+            success_str = 'Success'
         elif self.success is False:
-            successStr = 'Failure: %s' % self.errstr
+            success_str = 'Failure: %s' % self.errstr
         else:
-            successStr = 'Unknown'
+            success_str = 'Unknown'
 
-        return '%s %s' % (timeStr, successStr)
+        return '%s %s' % (time_str, success_str)
  
     def errorString(self):
         try:
@@ -264,7 +265,7 @@ class ArbCmd:
 
             if self.name == 'CompleteObs':
                 tt = self.total_time()
-                ot = self.open_time()
+                ot = self.total_open_time()
                 if tt != 0:
                     per = ot*100/tt
                 else:
@@ -425,7 +426,7 @@ class CompleteObs(ArbCmd):
 
     def setup_duration(self):
         '''Total setup time from start of PresetAO to end of StartAO'''
-        startao = filter(lambda x: x.name in ['StartAO', 'Start AO'], self.cmds)[0]
+        startao = list(filter(lambda x: x.name in ['StartAO', 'Start AO'], self.cmds))[0]
         return startao.end_time - self.start_time
 
     def ao_setup_overhead(self):
@@ -498,6 +499,9 @@ def detectCompleteObs(cmds):
             obsCmd.cmds.append(cmd)
             if cmd.name in ['Stop', 'StopAO']:
                 obsCmd.end_time = cmd.end_time
+                # If we are here, we got a PresetAO, a startAO and a stopAO
+                # so we declare it a success
+                obsCmd.success = True
                 newCmds.append(obsCmd)
                 inObs = False
 
@@ -522,7 +526,7 @@ def detectAcquires(cmds):
     for cmd in cmds:
         if cmd.name == 'AcquireRefAO':
             inAcquire = True
-            acquireCmd = ArbCmd( name='Acquire', start_time=cmd.start_time)
+            acquireCmd = ArbCmd(name='Acquire', start_time=cmd.start_time)
             acquireCmd.success = cmd.success
             acquireCmd.errstr = cmd.errstr
             acquireDone = False
@@ -540,12 +544,9 @@ def detectAcquires(cmds):
                 if hasattr(cmd, 'hoSpeed'):
                     acquireCmd.hoSpeed = cmd.hoSpeed
                 
-            elif cmd.name == 'CenterPupils' or \
-               cmd.name == 'CenterStar' or \
-               cmd.name == 'CloseLoop' or \
-               cmd.name == 'OptimizeGain' or \
-               cmd.name == 'ReCloseLoop' or \
-               cmd.name == 'getLastImage':
+            elif cmd.name in \
+               ['CenterPupils', 'CenterStar', 'CloseLoop', 'OptimizeGain',
+                'ReCloseLoop', 'getLastImage', 'ApplyOpticalGain']:
                 acquireCmd.success = acquireCmd.success and cmd.success
                 acquireCmd.errstr += cmd.errstr
                 acquireCmd.end_time = cmd.end_time
@@ -676,7 +677,8 @@ def outputEvents(title, events, sort=True):
 
 def output_cmd(title, found):
 
-    success = len(filter(lambda x: x.success, found))
+    found = list(found)
+    success = len([f for f in found if f.success])
     success_rate = 0
     if len(found)>0:
         success_rate = float(success) / len(found)
@@ -698,7 +700,7 @@ def output_cmd(title, found):
             print('<table id="aotable">')
             print('<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>')
         for cmd in found:
-            strtime = timeStr( cmd.start_time)
+            strtime = timeStr(cmd.start_time)
             if (cmd.end_time is not None) and (cmd.start_time is not None):
                 elapsed = '%5.1f s' % (cmd.end_time - cmd.start_time,)
             else:
@@ -720,11 +722,12 @@ def update_cmd_csv(cmds):
     csvfilename = os.path.join(args.outdir, 'cmd_%s.csv' % args.side)
     # read csv
     if os.path.exists(csvfilename):
-        with open(csvfilename, 'rb') as csvfile:
+        with open(csvfilename, 'r') as csvfile:
             data = list(csv.reader(csvfile, delimiter=','))
     else:
         data = []
 
+    cmds = list(cmds)
     if len(cmds) < 1:
         return
 
@@ -732,7 +735,7 @@ def update_cmd_csv(cmds):
     data = filter(lambda row: (row[0] != args.day) or (row[2] != cmds[0].name), data)
 
     # Remove header if any
-    data = filter(lambda row: row[0] != 'day', data)
+    data = list(filter(lambda row: row[0] != 'day', data))
 
     # Add our data
     for cmd in cmds:
@@ -753,7 +756,7 @@ def update_cmd_csv(cmds):
     data = [hdr]+data
 
     # Save csv   
-    with open(csvfilename, 'wb') as csvfile:
+    with open(csvfilename, 'w') as csvfile:
         csv.writer(csvfile, delimiter=',').writerows(data)
 
 
@@ -763,7 +766,7 @@ def update_output_csv(cmds):
 
     # read csv
     if os.path.exists(csvfilename):
-        with open(csvfilename, 'rb') as csvfile:
+        with open(csvfilename, 'r') as csvfile:
             data = list(csv.reader(csvfile, delimiter=','))
     else:
         data = []
@@ -772,7 +775,7 @@ def update_output_csv(cmds):
     data = filter(lambda row: row[0] != args.day, data)
 
     # Remove header if any
-    data = filter(lambda row: row[0] != 'day', data)
+    data = list(filter(lambda row: row[0] != 'day', data))
 
     # Add our data
     for cmd in cmds:
@@ -796,7 +799,7 @@ def update_output_csv(cmds):
     data = [hdr]+data
 
     # Save csv   
-    with open(csvfilename, 'wb') as csvfile:
+    with open(csvfilename, 'w') as csvfile:
         csv.writer(csvfile, delimiter=',').writerows(data)
 
 
@@ -840,8 +843,8 @@ success = {}
 
 events = []
 
-for key, name, string, klass in [
-        ('AOARB', ' - SkipFrame', SkipFrameEvent)
+for name, string, klass in [
+        ('AOARB', ' - SkipFrame', SkipFrameEvent),
         ('fastdiagn', 'Failing actuator detected', FailedActuatorEvent),
         ('fastdiagn', 'FUNCTEMERGENCYST', RIPEvent),
         ('housekeeper', 'FUNCTEMERGENCYST', RIPEvent),
