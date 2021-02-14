@@ -11,7 +11,6 @@ parser.add_argument('logdir', type=str, help='directory where log files are stor
 parser.add_argument('--html', action='store_true', default=False, help='generate html output')
 parser.add_argument('--outdir', type=str, default='.', help='output directory for csv files (default: %(default)s)')
 parser.add_argument('--verbose', action='store_true', default=False, help='verbose output')
-parser.add_argument('--summary', type=str, help='filename for optional summary in text and twiki format')
 args = parser.parse_args()
 
 
@@ -675,7 +674,7 @@ def outputEvents(title, events, sort=True):
             print('<p>')
 
 
-def output_cmd(title, found, cmd_code='1'):
+def output_cmd(title, found):
 
     success = len(filter(lambda x: x.success, found))
     success_rate = 0
@@ -712,16 +711,6 @@ def output_cmd(title, found, cmd_code='1'):
         if len(found)>0:
             print('</table>\n')
             print('</p>')
-
-    if args.outdir != '':
-       fileout = os.path.join(args.outdir,'data')
-       f = file(fileout,'a+')
-       for cmd in found:
-          code = -cmd_code
-          if cmd.success:
-             code = cmd_code
-          f.write('%f %d\n' % (julianDayFromUnix(k), code))
-       f.close()
 
     return success_rate
 
@@ -852,16 +841,14 @@ success = {}
 events = []
 
 for key, name, string, klass in [
-        ('skip', 'AOARB', ' - SkipFrame', SkipFrameEvent)
-        ('fail', 'fastdiagn', 'Failing actuator detected', FailedActuatorEvent),
-        ('fastRIP', 'fastdiagn', 'FUNCTEMERGENCYST', RIPEvent),
-        ('housekeeperRIP', 'housekeeper', 'FUNCTEMERGENCYST', RIPEvent),
+        ('AOARB', ' - SkipFrame', SkipFrameEvent)
+        ('fastdiagn', 'Failing actuator detected', FailedActuatorEvent),
+        ('fastdiagn', 'FUNCTEMERGENCYST', RIPEvent),
+        ('housekeeper', 'FUNCTEMERGENCYST', RIPEvent),
         ]:
 
     found = search(name, string, mindiff=120)
     events += map(klass.fromLogLine, found)
-    table[key] = len(found)
-
 
 outputEvents('Events', events, sort=True)
 
@@ -870,32 +857,30 @@ outputEvents('Events', events, sort=True)
 ###################
 # Commmands summary
 
-for key, cmd_code, string, title in [
-        ('complete',   1,  'CompleteObs',  'Complete observations (from PresetAO to StopAO, instrument presets only)'),
-        ('preset',     1,  'PresetAO',     'PresetAO'),
-        ('acquire',    13, 'Acquire',      'Acquire - StartAO sequences'),
-        ('offset',     15, 'Offset',       'Pause - Offset - Resume sequences'),
-        ('acquireref', 2,  'AcquireRefAO', 'AcquireRefAO'),
-        ('startao',    3,  'StartAO',      'StartAO'),
-        ('centerstar', 3,  'CenterStar',   'CenterStar'),
-        ('centerpupils',3, 'CenterPupils', 'CenterPupils'),
-        ('checkflux',  3,  'CheckFlux',    'CheckFlux'),
-        ('closeloop',  3,  'CloseLoop',    'CloseLoop'),
-        ('optimizegain',3, 'OptimizeGain', 'OptimizeGain'),
-        ('applyopticalgain', 3, 'ApplyOpticalGain', 'ApplyOpticalGain'),
-        ('offsetxy',   4,  'OffsetXY',     'OffsetXY'),
-        ('offsetz',    5,  'OffsetZ',      'OffsetZ'),
-        ('pause',      8,  'Pause',        'Pause'),
-        ('resume',     9,  'Resume',       'Resume'),
-        ('poweron',    7,  'PowerOnAdSec', 'PowerOnAdSec'),
-        ('loadshape',  14, 'PresetFlat',   'PresetFlat'),
-        ('rest',       15, 'MirrorRest',   'MirroRest'),
+for string, title in [
+        ('CompleteObs',  'Complete observations (from PresetAO to StopAO, instrument presets only)'),
+        ('PresetAO',     'PresetAO'),
+        ('Acquire',      'Acquire - StartAO sequences'),
+        ('Offset',       'Pause - Offset - Resume sequences'),
+        ('AcquireRefAO', 'AcquireRefAO'),
+        ('StartAO',      'StartAO'),
+        ('CenterStar',   'CenterStar'),
+        ('CenterPupils', 'CenterPupils'),
+        ('CheckFlux',    'CheckFlux'),
+        ('CloseLoop',    'CloseLoop'),
+        ('OptimizeGain', 'OptimizeGain'),
+        ('ApplyOpticalGain', 'ApplyOpticalGain'),
+        ('OffsetXY',     'OffsetXY'),
+        ('OffsetZ',      'OffsetZ'),
+        ('Pause',        'Pause'),
+        ('Resume',       'Resume'),
+        ('PowerOnAdSec', 'PowerOnAdSec'),
+        ('PresetFlat',   'PresetFlat'),
+        ('MirrorRest',   'MirroRest'),
         ]:
 
     found = cmdsByName(AOARB_cmds, string)
-    success_rate = output_cmd(title, found, cmd_code=cmd_code)
-    table[key] = len(found)
-    success[key] = success_rate
+    output_cmd(title, found)
 
 
 #######
@@ -905,29 +890,4 @@ if args.html:
 </body>
 </html>
 ''')
-
-if args.summary:
-
-    table['totalRIP'] = table['fastRIP'] +  table['housekeeperRIP']
-
-    fsummary = file(args.summary+".txt", 'w')
-    fsummary.write('Preset: %d - Acquire: %d - Cloop: %d - total RIPs: %d' %
-                   (table['preset'], table['acquireref'], table['startao'], table['totalRIP']))
-    fsummary.close()
-
-    fsummary = file(args.summary+".twiki", 'w')
-    percent_preset = ''
-    percent_acquireref = ''
-    percent_startao = ''
-    if table['preset'] > 0:
-        percent_preset = '(%d%%)' % int(success['preset']*100)
-    if table['acquireref'] > 0:
-        percent_acquireref = '(%d%%)' % int(success['acquireref']*100)
-    if table['startao'] > 0:
-        percent_startao = '(%d%%)' % int(success['startao']*100)
-       
-    fsummary.write('| %d %s | %d %s | %d %s | %d |' %
-                   (table['preset'], percent_preset, table['acquireref'], percent_acquireref, table['startao'], percent_startao, table['totalRIP']))
-    fsummary.close()
-
 
