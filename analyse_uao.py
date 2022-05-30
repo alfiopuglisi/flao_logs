@@ -200,7 +200,7 @@ class ArbCmd:
         else:
             success_str = 'Unknown'
 
-        return '%s %s' % (time_str, success_str)
+        return '%s %s %s' % (time_str, success_str, ' - '.join(self.details()))
  
     def errorString(self):
         try:
@@ -230,16 +230,29 @@ class ArbCmd:
 
         return self.refX != 0 or self.refY != 0 
 
+    def details2(self):
+
+        details2=[]
+        try:
+            if self.name == 'OffsetSequence':
+                details2.append('Time paused: %.1fs' % self.time_paused())
+
+            if self.name == 'ExposureSequence':
+                details2.append('Time exposing: %.1fs' % self.time_exposing())
+        except Exception as e:
+            print(e)
+
+        return details2
+
+
     def details(self):
 
         details=[]
         try:
-            if self.name == 'Offset' or self.name == 'OffsetXY':
+            if self.name == 'OffsetSequence' or self.name == 'OffsetXY':
                 coords = map( float, re.findall( self.floatPattern, self.args))
                 if len(coords) ==2:
-                    return ['X=%.2f, Y=%.2f mm' % (coords[0], coords[1])]
-                else:
-                    return ['']
+                    details.append('X=%.2f, Y=%.2f mm' % (coords[0], coords[1]))
 
             if self.name == 'PresetAO':
                 wfs = re.findall( self.wfsPattern, self.args)[0]
@@ -407,6 +420,38 @@ def get_AOARB_cmds():
 
     return cmds
 
+
+class OffsetSequence(ArbCmd):
+    '''A Pause - Offset - Resume sequence'''
+
+    def __init__(self, pause, resume, **kwargs):
+        ArbCmd.__init__(self, name='OffsetSequence', **kwargs)
+        self.pause = pause
+        self.resume = resume
+
+    def time_paused(self):
+        if self.pause and self.resume:
+            return self.resume.start_time - self.pause.end_time
+        else:
+            return 0
+
+    
+
+class ExposureSequence(ArbCmd):
+    '''A scientific exposure between Resume and Pause'''
+
+    def __init__(self, resume, pause, **kwargs):
+        ArbCmd.__init__(self, name='ExposureSequence', **kwargs)
+        self.pause = pause
+        self.resume = resume
+
+    def time_exposing(self):
+        if self.pause and self.resume:
+            return self.pause.start_time - self.resume.end_time
+        else:
+            return 0
+
+    
 
 class CompleteObs(ArbCmd):
 
@@ -595,7 +640,7 @@ def detectOffsets(cmds):
            errstr = ' '.join([x.errstr for x in cmds[n:n+3]])
            args = cmds[n+1].args
 
-           cmd = ArbCmd( name='Offset', args=args, start_time=t0, end_time=t1, success=success, errstr=errstr)
+           cmd = OffsetSequence(cmds[n], cmds[n+2], args=args, start_time=t0, end_time=t1, success=success, errstr=errstr)
            newCmds.append(cmd) 
 
         elif cmds[n].name == 'Pause' and \
@@ -604,7 +649,7 @@ def detectOffsets(cmds):
 
            t0 = cmds[n+0].start_time
            t1 = cmds[n+1].end_time
-           success = reduce(operator.and_, [x.success for x in cmds[n:n+2]])
+           success = reduce(operator.and_, [x.success is True for x in cmds[n:n+2]])
            errstr = ' '.join([x.errstr for x in cmds[n:n+2]])
            args = cmds[n+1].args
 
@@ -612,12 +657,23 @@ def detectOffsets(cmds):
                success = False
                errstr = 'Resume was not sent'
 
-           cmd = ArbCmd( name='Offset', args=args, start_time=t0, end_time=t1, success=success, errstr=errstr)
+           cmd = OffsetSequence(cmds[n], None, args=args, start_time=t0, end_time=t1, success=success, errstr=errstr)
            newCmds.append(cmd) 
 
+        elif cmds[n].name == 'Pause' and \
+             cmds[n+1].name == 'Resume':
+
+           t0 = cmds[n].start_time
+           t1 = cmds[n+1].end_time
+           success = cmds[n].success and cmds[n+1].success
+           errstr = cmds[n].errstr + ' ' + cmds[n+1].errstr
+           args = ''
+
+           cmd = OffsetSequence(cmds[n], cmds[n+1], args=args, start_time=t0, end_time=t1, success=success, errstr=errstr)
+           newCmds.append(cmd) 
 
         elif cmds[n].name == 'Pause':
-           # Next command is not an OffsetXY
+           # Next command is not an OffsetXY nor a Resume
 
            t0 = cmds[n].start_time
            t1 = cmds[n].end_time
@@ -627,9 +683,20 @@ def detectOffsets(cmds):
 
            if success:
                success = False
-               errstr = 'OffsetXY was not sent'
+               errstr = 'no OffsetXY or Resume'
 
-           cmd = ArbCmd( name='Offset', args=args, start_time=t0, end_time=t1, success=success, errstr=errstr)
+           cmd = OffsetSequence(cmds[n], None, args=args, start_time=t0, end_time=t1, success=success, errstr=errstr)
+           newCmds.append(cmd) 
+
+        elif cmds[n].name == 'Resume' and \
+             cmds[n+1].name == 'Pause':
+
+           t0 = cmds[n].start_time
+           t1 = cmds[n].end_time
+           success = cmds[n].success and cmds[n+1].success
+           errstr = cmds[n].errstr + ' ' + cmds[n+1].errstr
+
+           cmd = ExposureSequence(cmds[n], cmds[n+1], args=args, start_time=t0, end_time=t1, success=success, errstr=errstr)
            newCmds.append(cmd) 
 
         newCmds.append(cmds[n])
@@ -641,7 +708,7 @@ def cmdsByName(cmds, name):
     return filter(lambda x: x.name == name, cmds)
 
 
-def outputEvents(title, events, sort=True):
+def outputEvents(title, events, sort=True, complete_list=None):
 
     if sort:
         ev = {}
@@ -670,12 +737,14 @@ def outputEvents(title, events, sort=True):
             print(sortedEvents[0].htmlHeader())
             for e in sortedEvents:
                 print(e.htmlRow())
+                if complete_list is not None:
+                    complete_list[timeStr(e.t)] = e.htmlRow()
             print('</table>')
         else:
             print('<p>')
 
 
-def output_cmd(title, found):
+def output_cmd(title, found, complete_list=None):
 
     found = list(found)
     success = len([f for f in found if f.success])
@@ -698,7 +767,7 @@ def output_cmd(title, found):
         if len(found)>0:
             print('<p>')
             print('<table id="aotable">')
-            print('<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th></tr>')
+            print('<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th><th>More details</th></tr>')
         for cmd in found:
             strtime = timeStr(cmd.start_time)
             if (cmd.end_time is not None) and (cmd.start_time is not None):
@@ -709,7 +778,12 @@ def output_cmd(title, found):
                 errstr = 'Success'
             else:
                 errstr = cmd.errorString()
-            print('<tr><td>%s</td><td>%s</td><td>%s</td><td style="width: 300px">%s</td><td>%s</td></tr>' % (strtime, cmd.name, elapsed, errstr, '<br>'.join(cmd.details())))
+            row = '<tr><td>%s</td><td>%s</td><td>%s</td><td style="width: 300px">%s</td><td>%s</td><td>%s</td></tr>' % \
+                  (strtime, cmd.name, elapsed, errstr, '<br>'.join(cmd.details()), '<br>'.join(cmd.details2()))
+            print(row)
+            if complete_list is not None:
+                complete_list[strtime] = row
+
         if len(found)>0:
             print('</table>\n')
             print('</p>')
@@ -838,6 +912,8 @@ update_cmd_csv(cmdsByName(AOARB_cmds, 'OffsetXY'))
 table = {}
 success = {}
 
+complete_list = {}
+
 ################
 # Events report
 
@@ -853,7 +929,7 @@ for name, string, klass in [
     found = search(name, string, mindiff=120)
     events += map(klass.fromLogLine, found)
 
-outputEvents('Events', events, sort=True)
+outputEvents('Events', events, sort=True, complete_list=complete_list)
 
 
 
@@ -864,7 +940,8 @@ for string, title in [
         ('CompleteObs',  'Complete observations (from PresetAO to StopAO, instrument presets only)'),
         ('PresetAO',     'PresetAO'),
         ('Acquire',      'Acquire - StartAO sequences'),
-        ('Offset',       'Pause - Offset - Resume sequences'),
+        ('OffsetSequence',       'Pause - Offset - Resume sequences'),
+        ('ExposureSequence',     'Resume - Pause sequences'),
         ('AcquireRefAO', 'AcquireRefAO'),
         ('StartAO',      'StartAO'),
         ('CenterStar',   'CenterStar'),
@@ -879,11 +956,21 @@ for string, title in [
         ('Resume',       'Resume'),
         ('PowerOnAdSec', 'PowerOnAdSec'),
         ('PresetFlat',   'PresetFlat'),
-        ('MirrorRest',   'MirroRest'),
+        ('MirrorRest',   'MirrorRest'),
         ]:
 
     found = cmdsByName(AOARB_cmds, string)
-    output_cmd(title, found)
+    output_cmd(title, found, complete_list=complete_list)
+
+print('<HR>')
+print('<H2>All logs in temporal order</H2>')
+print('<p>')
+print('<table id="aotable">')
+print('<tr><th>Time</th><th>Command</th><th>Ex. time (s)</th><th style="width: 300px">Result</th><th>Details</th><th>More details</th></tr>')
+for k in sorted(complete_list.keys()):
+    print(complete_list[k])
+print('</table>\n')
+print('</p>')
 
 
 #######
