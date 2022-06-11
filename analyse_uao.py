@@ -1,33 +1,19 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import csv
 import os, time, getopt, sys, calendar, re
+import glob
 import operator, argparse
 from functools import reduce
 
 parser = argparse.ArgumentParser('UAO log analysis')
 parser.add_argument('day', type=str, help='UTC date YYYYMMDD format')
-parser.add_argument('side', type=str, help='side (R or L)')
+parser.add_argument('side', choices=['R', 'L'], help='side')
 parser.add_argument('logdir', type=str, help='directory where log files are stored')
 parser.add_argument('--html', action='store_true', default=False, help='generate html output')
 parser.add_argument('--outdir', type=str, default='.', help='output directory for csv files (default: %(default)s)')
 parser.add_argument('--verbose', action='store_true', default=False, help='verbose output')
 args = parser.parse_args()
-
-
-if args.side not in ['R', 'L']:
-    print()
-    print('Argument --side must be L or R')
-    print()
-    sys.exit(2)
-
-
-def logfilename(process, num=0):
-    y = args.day[0:4]
-    m = args.day[4:6]
-    d = args.day[6:8]
-    path = '%s/%s/%s/%s.%s.%s%04d.log' % (y, m, d, process, args.side, args.day, num)
-    return os.path.join(args.logdir, path)
 
 def log_timestamp(line):
     fields = line.split('|')
@@ -49,32 +35,23 @@ def hourStr(t):
 
 def logfile(name, grep=None):
     ''''
-    Returns a file-like object to read a logfile
+    Returns a file-like object to read log files
     '''
-    for n in range(10000):
-        filename= logfilename(name, num=n)
-        filenamegz = filename+'.gz'
-        if os.path.exists(filename):
-            if args.verbose:
-                print('Reading: '+filename)
-            if grep is not None:
-                cmd = 'grep "%s" %s' % (grep, filename)
-                return os.popen(cmd)
-            else:
-                return file(filename, 'r')
+    y = args.day[0:4]
+    m = args.day[4:6]
+    d = args.day[6:8]
+    glob_pattern = f'{args.logdir}/{y}/{m}/{d}/{name}.{args.side}.{args.day}[0-9][0-9][0-9][0-9].log*'
+    logfiles = ' '.join(sorted(glob.glob(glob_pattern)))
 
-        if os.path.exists(filenamegz):
-            if args.verbose:
-                print('Reading: '+filenamegz)
-            if grep is not None:
-                cmd = 'gzip -cd %s | grep "%s"' % (filenamegz, grep)
-                return os.popen(cmd)
-            else:
-                cmd = 'gzip -cd %s' % filenamegz
-                return os.popen(cmd)
-     
-    raise Exception('Cannot find log file: '+filename)
+    if not logfiles: raise Exception(f'Cannot find log file(s) matching: {glob_pattern}')
 
+    if args.verbose: print(f'Reading grep: "{grep}" glob: {logfiles}', file=sys.stderr)
+
+    # zcat/zgrep allow compressed or uncompressed files
+    if grep is None:
+        return os.popen(f'zcat {logfiles}')
+    else:
+        return os.popen(f'zgrep "{grep}" {logfiles}')
 
 def search(name, string=None, mindiff=1, getDict=False):
 
@@ -97,7 +74,7 @@ def search(name, string=None, mindiff=1, getDict=False):
                     print('Malformed line: '+f)
         else:
             if args.verbose:
-                print('Rejected '+f.strip())
+                print('Rejected '+f.strip(), file=sys.stderr)
         prev=now
 
     if getDict:
@@ -302,8 +279,6 @@ class ArbCmd:
 
 def get_AOARB_cmds():
 
-    import re
-
     lines = search('AOARB', string='MAIN', mindiff=0)
 
     cmds=[]
@@ -412,7 +387,7 @@ def get_AOARB_cmds():
 
       except Exception as e:
         if args.verbose:
-            print(e)
+            print(e, file=sys.stderr)
  
     # Store last command
     if curCmd is not None:
