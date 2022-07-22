@@ -9,11 +9,15 @@ parser = argparse.ArgumentParser('UAO log analysis')
 parser.add_argument('day', type=str, help='UTC date YYYYMMDD format')
 parser.add_argument('side', type=str, help='side (R or L)')
 parser.add_argument('logdir', type=str, help='directory where log files are stored')
+parser.add_argument('--wfs', type=str, default='FLAO', help='WFS type: FLAO, LBTI, etc')
+parser.add_argument('--mode', type=str, default='FLAOAO', help='WFS mode: FLAOAO, FLAOTT, etc')
+parser.add_argument('--start_time', type=str, default='02:00:00', help='Consider logs starting at this time (GMT) of each day')
+parser.add_argument('--end_time', type=str, default='12:00:00', help='Consider logs before this time (GTM) of each day')
 parser.add_argument('--html', action='store_true', default=False, help='generate html output')
 parser.add_argument('--outdir', type=str, default='.', help='output directory for csv files (default: %(default)s)')
 parser.add_argument('--verbose', action='store_true', default=False, help='verbose output')
 args = parser.parse_args()
-
+    
 
 if args.side not in ['R', 'L']:
     print()
@@ -183,6 +187,7 @@ class ArbCmd:
         self.start_time = start_time
         self.end_time = end_time
         self.success = success
+        self.wasIllegal = False
         self.errstr = errstr
         self.floatPattern ='[-+]?\d*\.\d+|d+'
         self.wfsPattern ='wfsSpec = (\w+)WFS'
@@ -190,6 +195,19 @@ class ArbCmd:
         self.refXPattern = 'roCoordX = (%s)' % self.floatPattern
         self.refYPattern = 'roCoordY = (%s)' % self.floatPattern
         self.modePattern = 'mode = (\w+)'
+        self.wfs = ''
+        self.mode = ''
+        self.mag = 0
+        self.faultCount = 0
+        self.recloseCount = 0
+        self.faultTimes = []
+        self.recloseTimes = []
+        self.reclosing = False
+        self.inFault = False
+        if name=='PresetAO':
+            _ = self.details()
+
+
  
     def report(self):
         time_str = timeStr(self.start_time)
@@ -294,6 +312,7 @@ class ArbCmd:
                     details.append('Ccd39 binning: %d' % self.hoBinning)
                 if hasattr(self, 'hoSpeed'):
                     details.append('Loop speed: %d Hz' % self.hoSpeed)
+          
         except Exception as e:
             print(e)
 
@@ -320,7 +339,11 @@ def get_AOARB_cmds():
     endCmdUao  = 'Status after command:'
 
     exceptionStr  = '[AOException]'
-    illegalCmdStr = 'Illegal command' 
+    illegalCmdStr = 'Illegal command for state' 
+    loopFaultStr = 'Loop fault detected. Opening loop.' 
+    recloseStr = 'Request: ReCloseLoop()'
+    closedStr = 'Status after command: AOArbitrator.LoopClosed'
+    retryCmdStr = 'Optical gain is not one' 
     interventionStr = 'Intervention:'
     readyForStartStr = 'Status after command: AOArbitrator.ReadyForStartAO'
     estimatedMagStr = 'Estimated magnitude from ccd39: '
@@ -328,16 +351,23 @@ def get_AOARB_cmds():
     hoSpeedStr =   'HO speed    : '
 
     lastAcquireRef=None
+    lastPreset=None
+    lastErrorTime=None
 
     for line in lines:
       try:
-        if (startCmdFlao in line) or (startCmdUao in line):
+
+        if ((startCmdFlao in line) or (startCmdUao in line)) and (recloseStr not in line):
 
             # Skip this command, that has no effect on FSM
-            if 'getLastImage' in line:
+            if 'getLastImage' in line or recloseStr in line:
                 continue
 
             if curCmd is not None:
+                if lastPreset:
+                    curCmd.wfs = lastPreset.wfs
+                    curCmd.mode = lastPreset.mode
+                    curCmd.mag = lastPreset.mag
                 cmds.append(curCmd)
                 curCmd = None
 
@@ -364,10 +394,12 @@ def get_AOARB_cmds():
             default_success = None
 
             curCmd = ArbCmd(name=name, args=args, start_time=t, end_time=None, success=default_success, errstr='')
+            if name == 'PresetAO':
+                lastPreset = curCmd
             if name == 'AcquireRefAO':
                 lastAcquireRef = curCmd
 
-        elif (endCmdFlao in line) or (endCmdUao in line):
+        elif ((endCmdFlao in line) or (endCmdUao in line)) and not curCmd.reclosing:
             t = log_timestamp(line)
             curCmd.end_time = t
             curCmd.success = True
@@ -382,11 +414,39 @@ def get_AOARB_cmds():
             pos = line.index(exceptionStr)
             curCmd.errstr = line[pos+len(exceptionStr):].strip()
             curCmd.success = False
+            if lastErrorTime:
+                if retryCmdStr in line:
+                    if curCmd.start_time - lastErrorTime < 30:
+                        lastErrorTime = curCmd.start_time
+                        curCmd = None
+                        continue
+#                        curCmd.success = True
+            lastErrorTime = curCmd.start_time
 
         elif illegalCmdStr in line:
             pos = line.index(illegalCmdStr)
             curCmd.errstr = line[pos:].strip()
             curCmd.success = False
+            curCmd.wasIllegal = True
+
+        elif loopFaultStr in line:
+            if not curCmd.inFault:
+                t = log_timestamp(line)
+                curCmd.faultCount += 1
+                curCmd.inFault = True
+                curCmd.faultTimes.append(t)
+        
+        elif recloseStr in line:
+            if curCmd.inFault:
+                curCmd.reclosing = True
+        
+        elif closedStr in line:
+            if curCmd.reclosing:
+                t = log_timestamp(line)
+                curCmd.recloseCount += 1
+                curCmd.recloseTimes.append(t)
+                curCmd.inFault = False
+                curCmd.reclosing = False
 
         # Detect intervention mode in Presets
         elif interventionStr in line:
@@ -411,12 +471,16 @@ def get_AOARB_cmds():
             curCmd.hoSpeed = int(line[pos+len(hoSpeedStr):].split()[0])
 
       except Exception as e:
-        if args.verbose:
-            print(e)
+        #if args.verbose:
+        print(e)
  
     # Store last command
     if curCmd is not None:
-        cmds.append(curCmd)
+      if lastPreset:
+        curCmd.wfs = lastPreset.wfs
+        curCmd.mode = lastPreset.mode
+        curCmd.mag = lastPreset.mag
+      cmds.append(curCmd)
 
     return cmds
 
@@ -458,6 +522,22 @@ class CompleteObs(ArbCmd):
     def __init__(self, *args, **kwargs):
         ArbCmd.__init__(self, *args, **kwargs)
         self.cmds = []
+
+    def total_closed_time(self):
+        tTime = 0
+        last_closed_time = self.startAOtime
+        t2 = None
+        #print self.startAOtime
+        #print self.recloseTimes
+        #print self.faultTimes
+        for t1, t2 in zip(self.faultTimes, self.recloseTimes):
+            tTime += t1 - last_closed_time
+            last_closed_time = t2
+        if len(self.faultTimes)==len(self.recloseTimes) and t2:
+            tTime += self.end_time - t2
+        if tTime==0:
+            tTime = self.total_time()
+        return tTime
 
     def total_time(self):
         '''Total observation time from start of PresetAO to end of StopAO'''
@@ -527,6 +607,7 @@ def detectCompleteObs(cmds):
     inPreset = False
     newCmds = []
     for cmd in cmds:
+        
         if cmd.name == 'PresetAO' and cmd.is_instrument_preset():
             inPreset = True
             inObs = False
@@ -542,6 +623,11 @@ def detectCompleteObs(cmds):
 
         elif inObs is True:
             obsCmd.cmds.append(cmd)
+            obsCmd.faultCount += cmd.faultCount
+            obsCmd.recloseCount += cmd.recloseCount
+            obsCmd.faultTimes += cmd.faultTimes
+            obsCmd.recloseTimes += cmd.recloseTimes
+
             if cmd.name in ['Stop', 'StopAO']:
                 obsCmd.end_time = cmd.end_time
                 # If we are here, we got a PresetAO, a startAO and a stopAO
@@ -555,6 +641,7 @@ def detectCompleteObs(cmds):
             if cmd.name in ['StartAO', 'Start AO']:
                 inPreset = False
                 inObs = True
+                obsCmd.startAOtime = cmd.start_time
 
         newCmds.append(cmd)
 
@@ -574,12 +661,15 @@ def detectAcquires(cmds):
             acquireCmd = ArbCmd(name='Acquire', start_time=cmd.start_time)
             acquireCmd.success = cmd.success
             acquireCmd.errstr = cmd.errstr
+            acquireCmd.wfs = cmd.wfs
+            acquireCmd.mode = cmd.mode
+            acquireCmd.mag = cmd.mag
             acquireDone = False
 
         elif inAcquire is True:
 
             if cmd.name == 'CheckFlux':
-                acquireCmd.success = acquireCmd.success and cmd.success
+                # acquireCmd.success = acquireCmd.success and cmd.success
                 acquireCmd.errstr += cmd.errstr
                 acquireCmd.end_time = cmd.end_time
                 if hasattr(cmd, 'estimatedMag'):
@@ -592,10 +682,11 @@ def detectAcquires(cmds):
             elif cmd.name in \
                ['CenterPupils', 'CenterStar', 'CloseLoop', 'OptimizeGain',
                 'ReCloseLoop', 'getLastImage', 'ApplyOpticalGain']:
-                acquireCmd.success = acquireCmd.success and cmd.success
+                # acquireCmd.success = acquireCmd.success and cmd.success
                 acquireCmd.errstr += cmd.errstr
                 acquireCmd.end_time = cmd.end_time
  
+
             elif cmd.name == 'Done':
                 acquireCmd.success = acquireCmd.success and cmd.success
                 acquireCmd.errstr += cmd.errstr
@@ -748,9 +839,13 @@ def output_cmd(title, found, complete_list=None):
 
     found = list(found)
     success = len([f for f in found if f.success])
+    illegal = len([f for f in found if f.wasIllegal])
     success_rate = 0
     if len(found)>0:
-        success_rate = float(success) / len(found)
+        success_rate = 0
+        den = float(len(found)-illegal)
+        if den>0:
+            success_rate = float(success) / den
 
     if not args.html:
         print()
@@ -790,10 +885,9 @@ def output_cmd(title, found, complete_list=None):
 
     return success_rate
 
+def update_cmd_success_csv(cmds):
 
-def update_cmd_csv(cmds):
-
-    csvfilename = os.path.join(args.outdir, 'cmd_%s.csv' % args.side)
+    csvfilename = os.path.join(args.outdir, 'cmd_succes%s.csv' % args.side)
     # read csv
     if os.path.exists(csvfilename):
         with open(csvfilename, 'r') as csvfile:
@@ -811,9 +905,94 @@ def update_cmd_csv(cmds):
     # Remove header if any
     data = list(filter(lambda row: row[0] != 'day', data))
 
+    cmd_attempts = {}
+    cmd_success = {}
+    days = {}
+    for cmd in cmds:
+        cmd_attempts[cmd.name] = 0
+        cmd_success[cmd.name] = 0
+
     # Add our data
     for cmd in cmds:
+
+        if cmd.wfs != args.wfs or cmd.mode != args.mode:
+            continue
+
+        if cmd.wasIllegal:
+            continue
+
+        if cmd.end_time is None or cmd.start_time is None:
+            continue
+
+        if hourStr(cmd.start_time) < args.start_time or hourStr(cmd.start_time) > args.end_time:
+            continue
+   
+        cmd_attempts[cmd.name] = int(cmd_attempts[cmd.name]) + 1
         if not cmd.success:
+            continue
+
+        cmd_success[cmd.name] = int(cmd_success[cmd.name]) + 1
+
+        days[cmd.name] = dayStr(cmd.start_time)
+
+    for cmd in days.keys():
+        row = (days[cmd], cmd, cmd_attempts[cmd], cmd_success[cmd])
+        data.append(row)
+
+    data.sort(key=lambda x: x[0])
+
+    hdr = ('day', 'command', 'attempts', 'successes')
+    data = [hdr]+data
+
+    # Save csv
+    with open(csvfilename, 'w') as csvfile:
+        csv.writer(csvfile, delimiter=',').writerows(data)
+
+
+
+def update_cmd_csv(cmds):
+
+    csvfilename = os.path.join(args.outdir, 'cmd_%s.csv' % args.side)
+    failedcsvfilename = os.path.join(args.outdir, 'cmd_failed_%s.csv' % args.side)
+    # read csv
+    if os.path.exists(csvfilename):
+        with open(csvfilename, 'r') as csvfile:
+            data = list(csv.reader(csvfile, delimiter=','))
+    else:
+        data = []
+
+    if os.path.exists(failedcsvfilename):
+        with open(failedcsvfilename, 'r') as csvfile:
+            dataf = list(csv.reader(csvfile, delimiter=','))
+    else:
+        dataf = []
+
+    cmds = list(cmds)
+    if len(cmds) < 1:
+        return
+
+    # Remove anything matching this day/cmd (assumes all cmds are equal)
+    data = filter(lambda row: (row[0] != args.day) or (row[2] != cmds[0].name), data)
+
+    # Remove header if any
+    data = list(filter(lambda row: row[0] != 'day', data))
+
+    # Add our data
+    for cmd in cmds:
+        if cmd.wfs != args.wfs or cmd.mode != args.mode:
+            continue
+        if cmd.wasIllegal:
+            continue
+        if hourStr(cmd.start_time) < args.start_time or hourStr(cmd.start_time) > args.end_time:
+            continue
+        if not cmd.success:
+            # print cmd.start_time,"Failed," + cmd.name + "," + str(cmd.mag)
+            d = dayStr(cmd.start_time)
+            h = hourStr(cmd.start_time)
+            faults = cmd.faultCount
+            recloses = cmd.recloseCount
+            rowf = (d, h, cmd.name, cmd.mag, faults, recloses)
+            dataf.append(rowf)
             continue
         if cmd.end_time is None or cmd.start_time is None:
             continue
@@ -821,17 +1000,24 @@ def update_cmd_csv(cmds):
         d = dayStr(cmd.start_time)
         h = hourStr(cmd.start_time)
         tottime = '%d' % (cmd.end_time - cmd.start_time)
-        row = (d, h, cmd.name, tottime)
+        faults = cmd.faultCount
+        recloses = cmd.recloseCount
+        row = (d, h, cmd.name, tottime, faults, recloses)
         data.append(row)
 
     data.sort(key=lambda x: x[0])
+    dataf.sort(key=lambda x: x[0])
 
-    hdr = ('day', 'hour', 'command', 'elapsed')
+    hdr = ('day', 'hour', 'command', 'elapsed', 'faults', 'recloses')
     data = [hdr]+data
 
+    hdr = ('day', 'hour', 'command', 'mag', 'faults', 'recloses')
+    dataf = [hdr]+dataf
     # Save csv   
     with open(csvfilename, 'w') as csvfile:
         csv.writer(csvfile, delimiter=',').writerows(data)
+    with open(failedcsvfilename, 'w') as csvfile:
+        csv.writer(csvfile, delimiter=',').writerows(dataf)
 
 
 def update_output_csv(cmds):
@@ -853,23 +1039,25 @@ def update_output_csv(cmds):
 
     # Add our data
     for cmd in cmds:
-        d = dayStr(cmd.start_time)
-        h = hourStr(cmd.start_time)
-        tottime = '%d' % cmd.total_time()
-        opentime = '%d' % cmd.total_open_time()
-        setuptime = '%d' % cmd.setup_duration()
-        aosetuptime = '%d' % cmd.ao_setup_overhead()
-        telsetuptime = '%d' % cmd.telescope_overhead()
-        offsetstime = '%d' % cmd.offsets_overhead()
-        tottime_h = str(float(tottime)/3600)
-        opentime_h = str(float(opentime)/3600)
+        if cmd.wfs == args.wfs and cmd.mode == args.mode:
+            d = dayStr(cmd.start_time)
+            h = hourStr(cmd.start_time)
+            tottime = '%d' % cmd.total_time()
+            opentime = '%d' % cmd.total_open_time()
+            closedtime = '%d' % cmd.total_closed_time()
+            setuptime = '%d' % cmd.setup_duration()
+            aosetuptime = '%d' % cmd.ao_setup_overhead()
+            telsetuptime = '%d' % cmd.telescope_overhead()
+            offsetstime = '%d' % cmd.offsets_overhead()
+            tottime_h = str(float(tottime)/3600)
+            opentime_h = str(float(opentime)/3600)
          
-        row = (d, h, tottime, tottime_h, opentime, opentime_h, setuptime, aosetuptime, telsetuptime, offsetstime, cmd.wfs, cmd.mode, cmd.mag)
-        data.append(row)
+            row = (d, h, tottime, tottime_h, opentime, opentime_h, setuptime, aosetuptime, telsetuptime, offsetstime, cmd.wfs, cmd.mode, cmd.mag, closedtime)
+            data.append(row)
 
     data.sort(key=lambda x: x[0])
 
-    hdr = ('day', 'hour', 'time', 'time_h', 'open', 'open_h', 'setup', 'aosetup', 'telsetup', 'offsets', 'wfs', 'mode', 'magnitude')
+    hdr = ('day', 'hour', 'time', 'time_h', 'open', 'open_h', 'setup', 'aosetup', 'telsetup', 'offsets', 'wfs', 'mode', 'magnitude', 'closedtime')
     data = [hdr]+data
 
     # Save csv   
@@ -908,6 +1096,21 @@ update_cmd_csv(cmdsByName(AOARB_cmds, 'CloseLoop'))
 update_cmd_csv(cmdsByName(AOARB_cmds, 'OptimizeGain'))
 update_cmd_csv(cmdsByName(AOARB_cmds, 'ApplyOpticalGain'))
 update_cmd_csv(cmdsByName(AOARB_cmds, 'OffsetXY'))
+update_cmd_csv(cmdsByName(AOARB_cmds, 'Acquire'))
+update_cmd_csv(cmdsByName(AOARB_cmds, 'AcquireRefAO'))
+
+update_cmd_success_csv(cmdsByName(AOARB_cmds, 'PresetAO'))
+update_cmd_success_csv(cmdsByName(AOARB_cmds, 'CenterStar'))
+update_cmd_success_csv(cmdsByName(AOARB_cmds, 'CenterPupils'))
+update_cmd_success_csv(cmdsByName(AOARB_cmds, 'CheckFlux'))
+update_cmd_success_csv(cmdsByName(AOARB_cmds, 'CloseLoop'))
+update_cmd_success_csv(cmdsByName(AOARB_cmds, 'OptimizeGain'))
+update_cmd_success_csv(cmdsByName(AOARB_cmds, 'ApplyOpticalGain'))
+update_cmd_success_csv(cmdsByName(AOARB_cmds, 'OffsetXY'))
+update_cmd_success_csv(cmdsByName(AOARB_cmds, 'CompleteObs'))
+update_cmd_success_csv(cmdsByName(AOARB_cmds, 'Acquire'))
+update_cmd_success_csv(cmdsByName(AOARB_cmds, 'AcquireRefAO'))
+
 
 table = {}
 success = {}
