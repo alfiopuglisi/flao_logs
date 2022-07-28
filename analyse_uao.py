@@ -906,10 +906,12 @@ def update_cmd_success_csv(cmds):
     data = list(filter(lambda row: row[0] != 'day', data))
 
     cmd_attempts = {}
+    cmd_illegals = {}
     cmd_success = {}
     days = {}
     for cmd in cmds:
         cmd_attempts[cmd.name] = 0
+        cmd_illegals[cmd.name] = 0
         cmd_success[cmd.name] = 0
 
     # Add our data
@@ -919,6 +921,7 @@ def update_cmd_success_csv(cmds):
             continue
 
         if cmd.wasIllegal:
+            cmd_illegals[cmd.name] = int(cmd_illegals[cmd.name]) + 1
             continue
 
         if cmd.end_time is None or cmd.start_time is None:
@@ -936,12 +939,12 @@ def update_cmd_success_csv(cmds):
         days[cmd.name] = dayStr(cmd.start_time)
 
     for cmd in days.keys():
-        row = (days[cmd], cmd, cmd_attempts[cmd], cmd_success[cmd])
+        row = (days[cmd], cmd, cmd_attempts[cmd], cmd_success[cmd], cmd_illegals[cmd])
         data.append(row)
 
     data.sort(key=lambda x: x[0])
 
-    hdr = ('day', 'command', 'attempts', 'successes')
+    hdr = ('day', 'command', 'attempts', 'successes', 'illegals')
     data = [hdr]+data
 
     # Save csv
@@ -1002,13 +1005,16 @@ def update_cmd_csv(cmds):
         tottime = '%d' % (cmd.end_time - cmd.start_time)
         faults = cmd.faultCount
         recloses = cmd.recloseCount
-        row = (d, h, cmd.name, tottime, faults, recloses)
+        intervention = '_'
+        if hasattr(cmd, 'intervention'):
+            intervention = cmd.intervention
+        row = (d, h, cmd.name, tottime, faults, recloses, intervention)
         data.append(row)
 
     data.sort(key=lambda x: x[0])
     dataf.sort(key=lambda x: x[0])
 
-    hdr = ('day', 'hour', 'command', 'elapsed', 'faults', 'recloses')
+    hdr = ('day', 'hour', 'command', 'elapsed', 'faults', 'recloses', 'intervention')
     data = [hdr]+data
 
     hdr = ('day', 'hour', 'command', 'mag', 'faults', 'recloses')
