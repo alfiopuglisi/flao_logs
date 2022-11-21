@@ -4,6 +4,7 @@ import csv
 import os, time, getopt, sys, calendar, re
 import operator, argparse
 from functools import reduce
+from collections import defaultdict
 
 parser = argparse.ArgumentParser('UAO log analysis')
 parser.add_argument('day', type=str, help='UTC date YYYYMMDD format')
@@ -18,6 +19,7 @@ parser.add_argument('--outdir', type=str, default='.', help='output directory fo
 parser.add_argument('--verbose', action='store_true', default=False, help='verbose output')
 args = parser.parse_args()
     
+repeatedErrors = defaultdict(int) 
 
 if args.side not in ['R', 'L']:
     print()
@@ -312,6 +314,7 @@ class ArbCmd:
                     details.append('Ccd39 binning: %d' % self.hoBinning)
                 if hasattr(self, 'hoSpeed'):
                     details.append('Loop speed: %d Hz' % self.hoSpeed)
+                    # print 'Loop speed: %d Hz' % self.hoSpeed
           
         except Exception as e:
             print(e)
@@ -348,7 +351,8 @@ def get_AOARB_cmds():
     readyForStartStr = 'Status after command: AOArbitrator.ReadyForStartAO'
     estimatedMagStr = 'Estimated magnitude from ccd39: '
     hoBinningStr = 'HO binning  : '
-    hoSpeedStr =   'HO speed    : '
+    hoSpeedStr1 =   'HO speed    : '
+    hoSpeedStr2 =  'Updating from WFS preset: freq= ' 
 
     lastAcquireRef=None
     lastPreset=None
@@ -418,6 +422,7 @@ def get_AOARB_cmds():
                 if retryCmdStr in line:
                     if curCmd.start_time - lastErrorTime < 30:
                         lastErrorTime = curCmd.start_time
+                        repeatedErrors[curCmd.name] += 1
                         curCmd = None
                         continue
 #                        curCmd.success = True
@@ -466,9 +471,13 @@ def get_AOARB_cmds():
             pos = line.index(hoBinningStr)
             curCmd.hoBinning = int(line[pos+len(hoBinningStr):])
 
-        elif hoSpeedStr in line:
-            pos = line.index(hoSpeedStr)
-            curCmd.hoSpeed = int(line[pos+len(hoSpeedStr):].split()[0])
+        elif hoSpeedStr1 in line:
+            pos = line.index(hoSpeedStr1)
+            curCmd.hoSpeed = float(line[pos+len(hoSpeedStr1):])
+
+        elif hoSpeedStr2 in line:
+            pos = line.index(hoSpeedStr2)
+            curCmd.hoSpeed = float(line[pos+len(hoSpeedStr2):])
 
       except Exception as e:
         #if args.verbose:
@@ -616,6 +625,9 @@ def detectCompleteObs(cmds):
             obsCmd.mode = cmd.mode
             obsCmd.mag = cmd.mag
             obsCmd.cmds.append(cmd)
+            obsCmd.hoSpeed = 0
+            if hasattr(cmd, 'hoSpeed'):
+                obsCmd.hoSpeed = cmd.hoSpeed
 
         elif inPreset is True and cmd.name == 'Cancel':
             inPreset = False
@@ -627,6 +639,8 @@ def detectCompleteObs(cmds):
             obsCmd.recloseCount += cmd.recloseCount
             obsCmd.faultTimes += cmd.faultTimes
             obsCmd.recloseTimes += cmd.recloseTimes
+            if hasattr(cmd, 'hoSpeed'):
+                obsCmd.hoSpeed = cmd.hoSpeed
 
             if cmd.name in ['Stop', 'StopAO']:
                 obsCmd.end_time = cmd.end_time
@@ -642,6 +656,9 @@ def detectCompleteObs(cmds):
                 inPreset = False
                 inObs = True
                 obsCmd.startAOtime = cmd.start_time
+            if hasattr(cmd, 'hoSpeed'):
+                obsCmd.hoSpeed = cmd.hoSpeed
+
 
         newCmds.append(cmd)
 
@@ -939,12 +956,12 @@ def update_cmd_success_csv(cmds):
         days[cmd.name] = dayStr(cmd.start_time)
 
     for cmd in days.keys():
-        row = (days[cmd], cmd, cmd_attempts[cmd], cmd_success[cmd], cmd_illegals[cmd])
+        row = (days[cmd], cmd, cmd_attempts[cmd], cmd_success[cmd], cmd_illegals[cmd], repeatedErrors[cmd])
         data.append(row)
 
     data.sort(key=lambda x: x[0])
 
-    hdr = ('day', 'command', 'attempts', 'successes', 'illegals')
+    hdr = ('day', 'command', 'attempts', 'successes', 'illegals', 'repeatedErrors')
     data = [hdr]+data
 
     # Save csv
@@ -1051,6 +1068,7 @@ def update_output_csv(cmds):
             tottime = '%d' % cmd.total_time()
             opentime = '%d' % cmd.total_open_time()
             closedtime = '%d' % cmd.total_closed_time()
+            speed = '%d' % cmd.hoSpeed
             setuptime = '%d' % cmd.setup_duration()
             aosetuptime = '%d' % cmd.ao_setup_overhead()
             telsetuptime = '%d' % cmd.telescope_overhead()
@@ -1058,12 +1076,12 @@ def update_output_csv(cmds):
             tottime_h = str(float(tottime)/3600)
             opentime_h = str(float(opentime)/3600)
          
-            row = (d, h, tottime, tottime_h, opentime, opentime_h, setuptime, aosetuptime, telsetuptime, offsetstime, cmd.wfs, cmd.mode, cmd.mag, closedtime)
+            row = (d, h, tottime, tottime_h, opentime, opentime_h, setuptime, aosetuptime, telsetuptime, offsetstime, cmd.wfs, cmd.mode, cmd.mag, closedtime, speed)
             data.append(row)
 
     data.sort(key=lambda x: x[0])
 
-    hdr = ('day', 'hour', 'time', 'time_h', 'open', 'open_h', 'setup', 'aosetup', 'telsetup', 'offsets', 'wfs', 'mode', 'magnitude', 'closedtime')
+    hdr = ('day', 'hour', 'time', 'time_h', 'open', 'open_h', 'setup', 'aosetup', 'telsetup', 'offsets', 'wfs', 'mode', 'magnitude', 'closedtime', 'speed')
     data = [hdr]+data
 
     # Save csv   
